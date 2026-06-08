@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Roan's Banking Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<div id="app">
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <svg class="brand-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M12 9v4M10 13h4"/></svg>
+      <span class="brand-text">Banking Dashboard</span>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#home" class="nav-item active" data-page="home">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span>Home</span>
+      </a>
+      <a href="#insights" class="nav-item" data-page="insights">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        <span>Insights</span>
+      </a>
+      <a href="#transactions" class="nav-item" data-page="transactions">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span>Transactions</span>
+      </a>
+      <a href="#connect" class="nav-item" data-page="connect">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+        <span>Connect Bank</span>
+      </a>
+    </nav>
+  </aside>
+
+  <main class="main-content">
+    <header class="page-header">
+      <h1 id="page-title">Dashboard</h1>
+      <div class="header-actions">
+        <span class="last-sync">Last sync: --</span>
+        <button class="btn btn-primary btn-sm" onclick="syncAll()">Sync now</button>
+      </div>
+    </header>
+    <div id="page-content"></div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/date-fns@3.6.0/cdn/date-fns.min.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
