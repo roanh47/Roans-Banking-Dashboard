@@ -3,7 +3,7 @@ services:
     build: .
     container_name: roans-banking-dashboard
     ports:
-      - "${APP_PORT:-8200}:8200"
+      - "8200:8200"
     volumes:
       - ./config/:/app/config/
       - ./.env:/app/.env:ro

@@ -16,11 +16,29 @@ A self-hosted personal finance dashboard that connects to EU bank accounts via O
 git clone https://github.com/roanh47/Roans-Banking-Dashboard.git
 cd Roans-Banking-Dashboard
 cp .env.example .env
-# Place your .pem key in config/
+```
+
+Edit `.env` and set your Enable Banking Application ID:
+
+```
+ENABLE_BANKING_APP_ID=your-uuid-here
+```
+
+Place your `.pem` private key in the `config/` folder (any filename works):
+
+```
+config/
+├── private.pem          ← your downloaded key
+└── (any-name.pem works)
+```
+
+Start the dashboard:
+
+```bash
 docker compose up -d --build
 ```
 
-Opens at **http://localhost:8200**.
+Open **http://localhost:8200**.
 
 ## Setup
 
@@ -30,28 +48,25 @@ You need an app registered at [enablebanking.com](https://enablebanking.com):
 
 1. Create an application (Sandbox or Production)
 2. Set **Redirect URI** to `http://localhost:8200/api/auth/callback`
-3. Download the private key and save it to `config/` (any `.pem` filename works)
+3. Download the private key → save to `config/`
 4. Copy your **Application ID** from the app detail page
 
-### 2. Configure environment
+### 2. Configure
 
-```bash
-cp .env.example .env
-```
+Just two things:
 
-Edit `.env` and set your Application ID:
+| File | What goes in it |
+|------|----------------|
+| `.env` | `ENABLE_BANKING_APP_ID=your-uuid` |
+| `config/` | Your `.pem` private key file |
 
-```
-ENABLE_BANKING_APP_ID=your-uuid-here
-```
+That's it. The entrypoint finds the `.pem` automatically — no path config needed.
 
 ### 3. Start
 
 ```bash
 docker compose up -d --build
 ```
-
-The container finds the first `.pem` file in `config/` automatically. If none exists, it generates one and prints the public certificate to the logs.
 
 ### 4. Connect a bank
 
@@ -60,18 +75,16 @@ The container finds the first `.pem` file in `config/` automatically. If none ex
 3. Pick your bank and authorize via OAuth
 4. Your balances appear on the dashboard
 
-Use the Sync now button to pull transactions.
+Use the **Sync now** button to pull transactions.
 
-## Configuration
+## How it works
 
-| Variable | Default | Notes |
-|----------|---------|-------|
-| `APP_PORT` | `8200` | Dashboard port |
-| `ENABLE_BANKING_APP_ID` | — | Your Enable Banking app UUID |
+```
+Browser → FastAPI → Enable Banking API (JWK signed with your .pem)
+                ↘ SQLite (local Docker volume)
+```
 
-### Private key
-
-The entrypoint scans `config/` for `.pem` files on each start. It uses the first match. Place your downloaded key there at any filename. No config needed.
+The entrypoint scans `config/*.pem` on every start. It signs JWT requests to Enable Banking using the first key it finds. No PEM path to configure.
 
 ## Security
 
