@@ -150,8 +150,19 @@ html, body {
   background: var(--accent);
   color: #fff;
 }
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
 
 .btn-primary:hover { background: var(--accent-light); }
+
+.btn-danger {
+  background: var(--red);
+  color: #fff;
+}
+
+.btn-danger:hover { background: #ff5252; }
 
 .btn-sm { padding: 7px 14px; font-size: 13px; }
 
@@ -336,6 +347,47 @@ tr:hover { background: var(--bg-card-hover); }
   margin-bottom: 28px;
 }
 
+.connect-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+  align-items: start;
+}
+
+.connect-section h2 {
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+
+.connect-section > p {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+}
+
+.bank-list {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
 .bank-list {
   display: flex;
   flex-direction: column;
@@ -426,4 +478,29 @@ tr:hover { background: var(--bg-card-hover); }
   .charts-grid { grid-template-columns: 1fr; }
   .balance-grid { grid-template-columns: 1fr; }
   .page-header { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .connect-layout { grid-template-columns: 1fr; }
+}
+
+/* Connections list */
+.connections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.connection-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.connection-name {
+  font-weight: 500;
+  display: block;
+}
+.connection-meta {
+  font-size: 12px;
+  color: var(--text-muted);
 }

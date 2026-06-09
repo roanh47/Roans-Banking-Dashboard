@@ -132,3 +132,37 @@ def auth_callback(request: Request, code: str = None, state: str = None, error: 
     conn.close()
 
     return RedirectResponse(url="/?connected=true")
+
+
+@router.get("/connections")
+def list_connections():
+    """List all bank connections with account counts."""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT bc.id, bc.bank_name, bc.created_at, bc.expires_at,
+               COUNT(a.id) as account_count
+        FROM bank_connections bc
+        LEFT JOIN accounts a ON a.connection_id = bc.id
+        GROUP BY bc.id
+        ORDER BY bc.created_at DESC
+    """).fetchall()
+    conn.close()
+    return {"connections": [dict(r) for r in rows]}
+
+
+@router.delete("/connections/{connection_id}")
+def delete_connection(connection_id: int):
+    """Delete a bank connection and its accounts + transactions."""
+    conn = get_db()
+    # Delete transactions for all accounts in this connection
+    conn.execute("""
+        DELETE FROM transactions WHERE account_id IN
+        (SELECT id FROM accounts WHERE connection_id = ?)
+    """, (connection_id,))
+    # Delete accounts
+    conn.execute("DELETE FROM accounts WHERE connection_id = ?", (connection_id,))
+    # Delete the connection
+    conn.execute("DELETE FROM bank_connections WHERE id = ?", (connection_id,))
+    conn.commit()
+    conn.close()
+    return {"deleted": True}

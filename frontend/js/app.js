@@ -465,35 +465,61 @@ const Pages = {
 
   async connect() {
     const page = document.getElementById("page-content");
-    page.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading available banks...</p></div>`;
+    page.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading...</p></div>`;
 
     try {
-      const data = await API.get("/api/auth/banks");
-      const banks = data.banks || [];
+      const [banksData, connsData] = await Promise.all([
+        API.get("/api/auth/banks"),
+        API.get("/api/auth/connections"),
+      ]);
+      const banks = banksData.banks || [];
+      const connections = connsData.connections || [];
+
+      const banksHtml = banks.map((b) => {
+        const id = b.bic || b.name;
+        const name = b.name || b.bank_name || b.bic || "Unknown";
+        const country = b.country || "";
+        return `<div class="bank-item" onclick="connectBank('${id}', '${name}', '${country}')">
+          <span class="bank-name">${name}</span>
+          <span class="bank-country">${country}</span>
+        </div>`;
+      }).join("");
+
+      const connHtml = connections.map((c) => {
+        const created = new Date(c.created_at + "Z").toLocaleDateString();
+        return `<div class="connection-item">
+          <div class="connection-info">
+            <span class="connection-name">${c.bank_name}</span>
+            <span class="connection-meta">${c.account_count} account${c.account_count !== 1 ? "s" : ""} · connected ${created}</span>
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="deleteConnection(${c.id})">Disconnect</button>
+        </div>`;
+      }).join("");
 
       page.innerHTML = `
-        <div class="connect-container">
-          <h2>Connect your bank</h2>
-          <p>Select your bank to securely connect via Open Banking (PSD2).<br>You'll be redirected to your bank's login page.</p>
-          ${banks.length === 0 ? '<p style="color:var(--text-muted);">No banks available. Make sure Enable Banking is configured.</p>' : ""}
-          <div class="bank-list">
-            ${banks
-              .map(
-                (b) => `
-              <div class="bank-item" onclick="connectBank('${b.bic || b.name}', '${b.name}', '${b.country}')">
-                <span class="bank-name">${b.name || b.bank_name || b.bic || "Unknown"}</span>
-                <span class="bank-country">${b.country || ""}</span>
-              </div>`
-              )
-              .join("")}
+        <div class="connect-layout">
+          <div class="connect-section">
+            <h2>Connect a bank</h2>
+            <p>Select your bank to connect via Open Banking (PSD2).</p>
+            <input type="text" id="bankSearch" placeholder="Search banks..." class="search-input"
+              oninput="filterBanks()">
+            <div id="bankList" class="bank-list">
+              ${banks.length === 0 ? '<p class="empty-state">No banks available. Check Enable Banking config.</p>' : banksHtml}
+            </div>
+          </div>
+          <div class="connect-section">
+            <h2>Connected banks</h2>
+            <div id="connectionsList" class="connections-list">
+              ${connections.length === 0 ? '<p class="empty-state">No banks connected yet.</p>' : connHtml}
+            </div>
           </div>
         </div>`;
     } catch (e) {
       page.innerHTML = `
-        <div class="error-banner">Could not load banks: ${e.message}</div>
+        <div class="error-banner">Could not load: ${e.message}</div>
         <div class="connect-container">
           <h2>Connect your bank</h2>
-          <p>Enable Banking is not configured yet or the API is unreachable. Check your .env and private key.</p>
+          <p>Enable Banking is not configured or unreachable. Check your .env and private key.</p>
         </div>`;
     }
   },
@@ -514,6 +540,28 @@ function navigate(page) {
 // Bank connect
 async function connectBank(bankId, bankName, bankCountry) {
   window.location.href = `/api/auth/connect/${encodeURIComponent(bankId)}?name=${encodeURIComponent(bankName)}&country=${encodeURIComponent(bankCountry)}`;
+}
+
+// Bank search filter
+function filterBanks() {
+  const q = document.getElementById("bankSearch").value.toLowerCase();
+  const items = document.querySelectorAll(".bank-item");
+  items.forEach((el) => {
+    el.style.display = el.textContent.toLowerCase().includes(q) ? "flex" : "none";
+  });
+}
+
+// Delete connection
+async function deleteConnection(id) {
+  if (!confirm("Disconnect this bank and remove its data?")) return;
+  try {
+    await fetch(`/api/auth/connections/${id}`, { method: "DELETE" });
+    // Refresh the page
+    const page = window.location.hash.replace("#", "") || "home";
+    navigate(page);
+  } catch (e) {
+    console.error("Delete error:", e);
+  }
 }
 
 // Sync
