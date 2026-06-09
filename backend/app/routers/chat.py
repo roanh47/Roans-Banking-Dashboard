@@ -21,7 +21,7 @@ def list_models():
         resp = requests.get(
             f"{settings.openai_base_url.rstrip('/')}/models",
             headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-            timeout=10,
+            timeout=15,
         )
         resp.raise_for_status()
         data = resp.json()

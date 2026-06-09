@@ -724,15 +724,19 @@ function initBankBot() {
   const modelSelect = document.getElementById("bankbot-model");
 
   // Load models
-  API.get("/api/chat/models").then((data) => {
-    if (data.models?.length) {
-      modelSelect.innerHTML = data.models
-        .map((m) => `<option value="${m}">${m}</option>`)
-        .join("");
-    } else {
-      modelSelect.innerHTML = '<option value="">No models</option>';
-    }
-  });
+  API.get("/api/chat/models")
+    .then((data) => {
+      if (data.models?.length) {
+        modelSelect.innerHTML = data.models
+          .map((m) => `<option value="${m}">${m}</option>`)
+          .join("");
+      } else {
+        modelSelect.innerHTML = '<option value="">No models</option>';
+      }
+    })
+    .catch(() => {
+      modelSelect.innerHTML = '<option value="">Models unavailable</option>';
+    });
 
   toggle.onclick = () => {
     chat.classList.toggle("bankbot-hidden");
