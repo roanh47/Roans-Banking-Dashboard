@@ -480,8 +480,8 @@ const Pages = {
             ${banks
               .map(
                 (b) => `
-              <div class="bank-item" onclick="connectBank('${b.id || b.aspsp_id || b}')">
-                <span class="bank-name">${b.name || b.bank_name || b.id || b}</span>
+              <div class="bank-item" onclick="connectBank('${b.bic || b.name}', '${b.name}', '${b.country}')">
+                <span class="bank-name">${b.name || b.bank_name || b.bic || "Unknown"}</span>
                 <span class="bank-country">${b.country || ""}</span>
               </div>`
               )
@@ -512,8 +512,8 @@ function navigate(page) {
 }
 
 // Bank connect
-async function connectBank(bankId) {
-  window.location.href = `/api/auth/connect/${encodeURIComponent(bankId)}`;
+async function connectBank(bankId, bankName, bankCountry) {
+  window.location.href = `/api/auth/connect/${encodeURIComponent(bankId)}?name=${encodeURIComponent(bankName)}&country=${encodeURIComponent(bankCountry)}`;
 }
 
 // Sync

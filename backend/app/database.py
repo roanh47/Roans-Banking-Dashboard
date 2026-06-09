@@ -1,5 +1,4 @@
 import sqlite3
-import json
 from pathlib import Path
 
 DB_PATH = Path("/app/data/dashboard.db")
@@ -10,12 +9,21 @@ def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
 def init_db():
     conn = get_db()
     conn.executescript("""
+        CREATE TABLE IF NOT EXISTS pending_connections (
+            state TEXT PRIMARY KEY,
+            bank_name TEXT NOT NULL,
+            bank_country TEXT,
+            aspsp_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TABLE IF NOT EXISTS bank_connections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             bank_name TEXT NOT NULL,
