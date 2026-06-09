@@ -518,12 +518,20 @@ const Pages = {
         return;
       }
 
+      const bankColors = ["#6c5ce7", "#00d68f", "#5b9aff", "#ff6b6b", "#ff9f43", "#ff7675", "#74b9ff", "#a29bfe"];
+
       let html = "";
-      for (const bank of banks) {
+      for (let i = 0; i < banks.length; i++) {
+        const bank = banks[i];
+        const color = bankColors[i % bankColors.length];
         const total = new Intl.NumberFormat("en-EU", {
           style: "currency",
           currency: "EUR",
         }).format(bank.total_balance || 0);
+
+        const created = new Date(bank.created_at + "Z").toLocaleDateString("nl-NL");
+        const expires = bank.expires_at ? new Date(bank.expires_at + "Z").toLocaleDateString("nl-NL") : "--";
+        const initial = bank.bank_name.charAt(0).toUpperCase();
 
         let accountsHtml = "";
         for (const acc of bank.accounts || []) {
@@ -533,52 +541,116 @@ const Pages = {
           }).format(acc.balance || 0);
 
           const signClass = (acc.balance || 0) >= 0 ? "balance-positive" : "balance-negative";
+          const syncDate = acc.last_synced ? new Date(acc.last_synced + "Z").toLocaleDateString("nl-NL") : "--";
           accountsHtml += `
             <div class="bank-account-row">
               <div class="bank-account-info">
                 <div class="bank-account-name">${acc.name}</div>
                 <div class="bank-account-iban">${acc.iban ? acc.iban.slice(0, 22) + "..." : acc.account_type || ""}</div>
               </div>
-              <div class="bank-account-balance ${signClass}">${bal}</div>
+              <div class="bank-account-detail">
+                <span class="bank-account-sync">${syncDate}</span>
+                <span class="bank-account-balance ${signClass}">${bal}</span>
+              </div>
             </div>`;
         }
 
-        const created = new Date(bank.created_at + "Z").toLocaleDateString();
-
         html += `
-          <div class="bank-group">
-            <div class="bank-group-header">
-              <div class="bank-group-info">
-                <div class="bank-group-name">${bank.bank_name}</div>
-                <div class="bank-group-meta">${bank.accounts.length} account${bank.accounts.length !== 1 ? "s" : ""} · connected ${created}</div>
+          <div class="bank-card">
+            <div class="bank-card-header" style="--bank-color: ${color};">
+              <div class="bank-card-brand">
+                <div class="bank-card-icon">${initial}</div>
+                <div class="bank-card-info">
+                  <div class="bank-card-name">${bank.bank_name}</div>
+                  <div class="bank-card-sub">${bank.accounts.length} account${bank.accounts.length !== 1 ? "en" : ""} · Sinds ${created}</div>
+                </div>
               </div>
-              <div class="bank-group-total">${total}</div>
-              <button class="btn btn-danger btn-sm" onclick="deleteBank(${bank.id})">Disconnect</button>
+              <div class="bank-card-actions">
+                <div class="bank-card-total">${total}</div>
+                <button class="btn btn-danger btn-sm" onclick="showDisconnectModal(${bank.id}, '${bank.bank_name}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                    <polyline points="16 17 21 12 16 7"/>
+                    <line x1="21" y1="12" x2="9" y2="12"/>
+                  </svg>
+                  Ontkoppelen
+                </button>
+              </div>
             </div>
-            ${accountsHtml}
+            <div class="bank-card-body">
+              <div class="bank-card-meta">
+                <span>Verbinding verloopt: ${expires}</span>
+              </div>
+              <div class="bank-accounts-list">
+                <div class="bank-accounts-header">
+                  <span>Rekeningen</span>
+                  <span>Saldo</span>
+                </div>
+                ${accountsHtml}
+              </div>
+            </div>
           </div>`;
       }
 
       page.innerHTML = `
         <div class="page-subheader">
-          <p>Manage your connected bank accounts.</p>
+          <p>Beheer je aangesloten bankrekeningen.</p>
         </div>
-        <div class="banks-list">${html}</div>`;
+        <input type="text" id="banksSearch" placeholder="Zoek op banknaam..." class="search-input" oninput="filterBanksList()" style="margin-bottom:16px;">
+        <div class="banks-grid">${html}</div>
+        <div id="disconnectOverlay" class="modal-overlay" style="display:none;" onclick="closeDisconnectModal(event)">
+          <div class="modal-box" onclick="event.stopPropagation()">
+            <div class="modal-icon">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            <h3 id="disconnectBankName">Bank ontkoppelen?</h3>
+            <p>Alle rekeninggegevens en transacties van deze bank worden verwijderd. Dit kan niet ongedaan worden gemaakt.</p>
+            <div class="modal-actions">
+              <button class="btn btn-outline" onclick="closeDisconnectModal()">Annuleren</button>
+              <button class="btn btn-danger" id="confirmDisconnectBtn" onclick="confirmDisconnect()">
+                Ja, ontkoppelen
+              </button>
+            </div>
+          </div>
+        </div>`;
     } catch (e) {
       page.innerHTML = `<div class="error-banner">Could not load banks: ${e.message}</div>`;
     }
   },
 };
 
-// Delete bank
-async function deleteBank(id) {
-  if (!confirm("Disconnect this bank and remove its data?")) return;
+// Disconnect modal state
+let _disconnectId = null;
+
+function showDisconnectModal(id, bankName) {
+  _disconnectId = id;
+  document.getElementById("disconnectBankName").textContent = `${bankName} ontkoppelen?`;
+  document.getElementById("disconnectOverlay").style.display = "flex";
+}
+
+function closeDisconnectModal(e) {
+  if (e && e.target !== e.currentTarget) return;
+  document.getElementById("disconnectOverlay").style.display = "none";
+  _disconnectId = null;
+}
+
+async function confirmDisconnect() {
+  if (!_disconnectId) return;
+  const btn = document.getElementById("confirmDisconnectBtn");
+  btn.disabled = true;
+  btn.textContent = "Bezig...";
   try {
-    await fetch(`/api/auth/connections/${id}`, { method: "DELETE" });
-    // Re-render the banks page
+    const res = await fetch(`/api/auth/connections/${_disconnectId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error("Failed to disconnect");
+    closeDisconnectModal();
     Pages.banks();
   } catch (e) {
-    console.error("Delete error:", e);
+    console.error("Disconnect error:", e);
+    btn.disabled = false;
+    btn.textContent = "Ja, ontkoppelen";
   }
 }
 
@@ -608,17 +680,13 @@ function filterBanks() {
   });
 }
 
-// Delete connection
-async function deleteConnection(id) {
-  if (!confirm("Disconnect this bank and remove its data?")) return;
-  try {
-    await fetch(`/api/auth/connections/${id}`, { method: "DELETE" });
-    // Refresh the page
-    const page = window.location.hash.replace("#", "") || "home";
-    navigate(page);
-  } catch (e) {
-    console.error("Delete error:", e);
-  }
+// Banks page search filter
+function filterBanksList() {
+  const q = document.getElementById("banksSearch").value.toLowerCase();
+  const cards = document.querySelectorAll(".bank-card");
+  cards.forEach((el) => {
+    el.style.display = el.textContent.toLowerCase().includes(q) ? "" : "none";
+  });
 }
 
 // Sync
@@ -644,10 +712,93 @@ window.addEventListener("hashchange", () => {
   navigate(page);
 });
 
+// --- BankBot ---
+
+function initBankBot() {
+  const toggle = document.getElementById("bankbot-toggle");
+  const chat = document.getElementById("bankbot-chat");
+  const close = document.getElementById("bankbot-close");
+  const input = document.getElementById("bankbot-input");
+  const send = document.getElementById("bankbot-send");
+  const messages = document.getElementById("bankbot-messages");
+  const modelSelect = document.getElementById("bankbot-model");
+
+  // Load models
+  API.get("/api/chat/models").then((data) => {
+    if (data.models?.length) {
+      modelSelect.innerHTML = data.models
+        .map((m) => `<option value="${m}">${m}</option>`)
+        .join("");
+    } else {
+      modelSelect.innerHTML = '<option value="">No models</option>';
+    }
+  });
+
+  toggle.onclick = () => {
+    chat.classList.toggle("bankbot-hidden");
+    if (!chat.classList.contains("bankbot-hidden")) input.focus();
+  };
+  close.onclick = () => chat.classList.add("bankbot-hidden");
+
+  function addMessage(text, isUser) {
+    const div = document.createElement("div");
+    div.className = "bankbot-msg " + (isUser ? "bankbot-user" : "bankbot-bot");
+    div.innerHTML = `<div class="bankbot-bubble">${text}</div>`;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  async function sendMessage() {
+    const msg = input.value.trim();
+    if (!msg) return;
+    input.value = "";
+    addMessage(escapeHtml(msg), true);
+
+    // Loading indicator
+    const loadingDiv = document.createElement("div");
+    loadingDiv.className = "bankbot-msg bankbot-bot bankbot-loading";
+    loadingDiv.innerHTML = '<div class="bankbot-bubble">Thinking</div>';
+    messages.appendChild(loadingDiv);
+    messages.scrollTop = messages.scrollHeight;
+
+    const model = modelSelect.value || "";
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: msg, model }),
+      });
+      loadingDiv.remove();
+      if (!res.ok) {
+        const err = await res.text();
+        addMessage("Error: " + escapeHtml(err), false);
+        return;
+      }
+      const data = await res.json();
+      addMessage(escapeHtml(data.reply || "(no response)"), false);
+    } catch (e) {
+      loadingDiv.remove();
+      addMessage("Error: " + escapeHtml(e.message), false);
+    }
+  }
+
+  send.onclick = sendMessage;
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendMessage();
+  });
+}
+
+function escapeHtml(text) {
+  const d = document.createElement("div");
+  d.textContent = text;
+  return d.innerHTML;
+}
+
 // Init
 document.addEventListener("DOMContentLoaded", () => {
   const page = window.location.hash.replace("#", "") || "home";
   navigate(page);
+  initBankBot();
 });
 
 // Check for connection success

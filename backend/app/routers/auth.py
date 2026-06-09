@@ -21,8 +21,11 @@ def list_banks():
 def connect_bank(bank_id: str, request: Request, name: str = None, country: str = None):
     """Redirect user to their bank's login page."""
     client = EnableBankingClient()
-    # Dynamisch op basis van request — matched 127.0.0.1, localhost:8200 én banking.roanheemstra.nl
-    redirect_uri = str(request.base_url).rstrip("/") + "/api/auth/callback"
+
+    # Detect the public-facing URL (works behind Cloudflare/nginx)
+    scheme = request.headers.get("X-Forwarded-Proto", request.url.scheme)
+    host = request.headers["host"]
+    redirect_uri = f"{scheme}://{host}/api/auth/callback"
 
     result = client.initiate_auth(
         name or bank_id,

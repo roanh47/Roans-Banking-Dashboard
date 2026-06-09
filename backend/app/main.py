@@ -4,7 +4,7 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 
 from app.database import init_db
-from app.routers import auth, accounts, transactions, insights, sync
+from app.routers import auth, accounts, transactions, insights, sync, chat
 
 app = FastAPI(title="Roan's Banking Dashboard")
 
@@ -17,6 +17,7 @@ app.include_router(accounts.router)
 app.include_router(transactions.router)
 app.include_router(insights.router)
 app.include_router(sync.router)
+app.include_router(chat.router)
 
 # Serve frontend static files
 static_dir = Path("/app/static")

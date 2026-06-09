@@ -9,6 +9,7 @@ A self-hosted personal finance dashboard that connects to EU bank accounts via O
 - **Transactions** — searchable list with category filters
 - **Bank linking** — OAuth via Enable Banking (Revolut, N26, Rabobank, 800+ EU banks)
 - **Sync** — one-click refresh for balances and transactions
+- **BankBot** — AI assistant that answers questions about your finances
 
 ## Quick start
 
@@ -46,19 +47,31 @@ Open **http://localhost:8200**.
 
 You need an app registered at [enablebanking.com](https://enablebanking.com):
 
-1. Create an application (Sandbox or Production)
-2. Set **Redirect URI** to `http://localhost:8200/api/auth/callback`
-3. Download the private key → save to `config/`
-4. Copy your **Application ID** from the app detail page
+Need a **Redirect URI** — set this to `http://localhost:8200/api/auth/callback` for local use, or `https://your-domain.com/api/auth/callback` for production behind a reverse proxy.
 
-### 2. Configure
+3. **Key generation**: choose *Generate in browser*, download the `.pem` file, or choose *Generate outside browser* and let the app generate one for you (see below).
 
-Just two things:
+### 2. Private key
 
-| File | What goes in it |
-|------|----------------|
-| `.env` | `ENABLE_BANKING_APP_ID=your-uuid` |
-| `config/` | Your `.pem` private key file |
+**Option A — you generated one in the Enable Banking dashboard**
+Save the downloaded `.pem` anywhere in `config/`:
+```
+config/
+├── private.pem
+└── (any-name.pem works)
+```
+
+**Option B — let the app generate a key for you**
+Just start the dashboard without a `.pem` file:
+```bash
+docker compose up -d --build
+```
+The entrypoint creates a new 4096-bit RSA key and prints a **public certificate** (PEM format) in the logs. Copy that certificate and upload it to your Enable Banking application as the public key.
+
+```bash
+# View the generated certificate
+docker logs roans-banking-dashboard 2>&1 | grep -A 30 "Public key"
+```
 
 That's it. The entrypoint finds the `.pem` automatically — no path config needed.
 
@@ -77,10 +90,37 @@ docker compose up -d --build
 
 Use the **Sync now** button to pull transactions.
 
+## BankBot (AI assistant)
+
+BankBot is a chat assistant in the bottom-right corner that can answer questions about your finances.
+
+### Setup
+
+Add these to your `.env` file:
+
+```
+OPENAI_API_KEY=sk-your-key-here
+OPENAI_BASE_URL=https://api.openai.com/v1
+```
+
+Any OpenAI-compatible API works (OpenAI, DeepSeek, GLM, OpenRouter, etc.). Just set the base URL and key.
+
+### Usage
+
+1. Click the chat bubble in the bottom-right corner
+2. Select a model from the dropdown (fetched automatically from `/models`)
+3. Ask questions like:
+   - "How much did I spend at Albert Heijn this month?"
+   - "What's my current balance?"
+   - "Show me my spending by category"
+   - "How much income did I have last month?"
+
+BankBot reads the dashboard's database to answer — accounts, balances, transactions, and monthly summaries.
+
 ## How it works
 
 ```
-Browser → FastAPI → Enable Banking API (JWK signed with your .pem)
+Browser → FastAPI → Enable Banking API (JWT signed with your .pem)
                 ↘ SQLite (local Docker volume)
 ```
 
@@ -99,10 +139,15 @@ The entrypoint scans `config/*.pem` on every start. It signs JWT requests to Ena
 Check `ENABLE_BANKING_APP_ID` in `.env` and that the app is active in Enable Banking.
 
 **Redirect URI errors from Enable Banking**
-Add `http://<your-domain>:8200/api/auth/callback` to your app's redirect URLs in the Enable Banking dashboard.
+The app automatically uses the URL you access it from. If behind a reverse proxy, ensure `X-Forwarded-Proto` and `Host` headers are set correctly.
+For local use, make sure the redirect URI in your Enable Banking app matches `http://localhost:8200/api/auth/callback`.
+For production, it should match `https://your-domain.com/api/auth/callback`.
 
 **Sync pulls no transactions**
 Some sandbox banks return empty transaction sets. Try a different bank or switch to production mode.
+
+**BankBot says "not configured"**
+Add `OPENAI_API_KEY` and `OPENAI_BASE_URL` to your `.env`.
 
 ## License
 

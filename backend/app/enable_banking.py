@@ -78,7 +78,8 @@ class EnableBankingClient:
             headers=self._headers(),
             json=payload,
         )
-        resp.raise_for_status()
+        if resp.status_code != 200:
+            raise Exception(f"Enable Banking API error {resp.status_code}: {resp.text[:500]}")
         data = resp.json()
         data["state"] = state
         return data
@@ -111,6 +112,16 @@ class EnableBankingClient:
         """Fetch accounts for a session. Uses app JWT + session_id."""
         data = self.get_session(session_id)
         return data.get("accounts", [])
+
+    def get_balances(self, account_id: str) -> list:
+        """Fetch balances for a specific account. Uses app JWT."""
+        resp = requests.get(
+            f"{self.BASE_URL}/accounts/{account_id}/balances",
+            headers=self._headers(),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("balances", [])
 
     def get_transactions(
         self, account_id: str, date_from: str = None, date_to: str = None,
