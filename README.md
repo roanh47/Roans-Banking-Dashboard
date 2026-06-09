@@ -68,11 +68,10 @@ Use the Sync now button to pull transactions.
 |----------|---------|-------|
 | `APP_PORT` | `8200` | Dashboard port |
 | `ENABLE_BANKING_APP_ID` | — | Your Enable Banking app UUID |
-| `PRIVATE_KEY_PATH` | `/app/config/private.pem` | Overridden by entrypoint on container start |
 
 ### Private key
 
-The entrypoint scans `config/` for `.pem` files on each start. It uses the first match. Place your downloaded key there at any filename.
+The entrypoint scans `config/` for `.pem` files on each start. It uses the first match. Place your downloaded key there at any filename. No config needed.
 
 ## Security
 
