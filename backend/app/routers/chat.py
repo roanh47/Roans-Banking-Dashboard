@@ -99,7 +99,7 @@ def _call_messages_api(base_url: str, api_key: str, model: str, system_prompt: s
     resp = requests.post(
         f"{base_url.rstrip('/')}/messages",
         headers={
-            "Authorization": f"Bearer {api_key}",
+            "x-api-key": api_key,
             "Content-Type": "application/json",
             "anthropic-version": "2023-06-01",
         },

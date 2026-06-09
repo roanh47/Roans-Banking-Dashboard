@@ -779,7 +779,7 @@ function initBankBot() {
         return;
       }
       const data = await res.json();
-      addMessage(escapeHtml(data.reply || "(no response)"), false);
+      addMessage(renderMarkdown(data.reply || "(no response)"), false);
     } catch (e) {
       loadingDiv.remove();
       addMessage("Error: " + escapeHtml(e.message), false);
@@ -796,6 +796,40 @@ function escapeHtml(text) {
   const d = document.createElement("div");
   d.textContent = text;
   return d.innerHTML;
+}
+
+function renderMarkdown(text) {
+  // Escape HTML first, then convert markdown to HTML
+  const d = document.createElement("div");
+  d.textContent = text;
+  let html = d.innerHTML;
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  // Italic
+  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  // Inline code
+  html = html.replace(/`(.+?)`/g, "<code style='background:var(--bg-secondary);padding:2px 6px;border-radius:4px;font-size:12px;'>$1</code>");
+  // Bullet lists
+  html = html.replace(/^[\s]*[-*][\s]+(.+)$/gm, "&bull; $1");
+  // Tables (simple pipe format) - convert to HTML table
+  if (html.includes("|") && html.includes("\n")) {
+    html = html.replace(/\n?\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)+)/g, function(match, header, body) {
+      const headers = header.split("|").map(h => h.trim());
+      const rows = body.trim().split("\n").map(row => {
+        const cells = row.split("|").slice(1, -1).map(c => c.trim());
+        return "<tr>" + cells.map(c => "<td style='padding:4px 10px;border:1px solid var(--border);'>" + c + "</td>").join("") + "</tr>";
+      }).join("");
+      return "<table style='border-collapse:collapse;margin:8px 0;font-size:12px;width:100%;'>" +
+        "<thead><tr>" + headers.map(h => "<th style='padding:4px 10px;border:1px solid var(--border);text-align:left;'>" + h + "</th>").join("") + "</tr></thead>" +
+        "<tbody>" + rows + "</tbody></table>";
+    });
+  }
+  // Line breaks (double newlines = paragraphs)
+  html = html.replace(/\n\n/g, "</p><p style='margin:8px 0;'>");
+  html = "<p style='margin:0;'>" + html + "</p>";
+  // Single newlines
+  html = html.replace(/\n/g, "<br>");
+  return html;
 }
 
 // Init
