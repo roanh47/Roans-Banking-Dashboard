@@ -88,17 +88,71 @@ def _collect_dashboard_context() -> str:
     return "\n".join(parts)
 
 
+def _model_uses_messages_api(model_id: str) -> bool:
+    """Detect if a model uses the Anthropic Messages API (/messages) or the OpenAI Chat API (/chat/completions)."""
+    prefix = model_id.split("-")[0].lower() if "-" in model_id else model_id.lower()
+    return prefix in ("minimax", "qwen")
+
+
+def _call_messages_api(base_url: str, api_key: str, model: str, system_prompt: str, user_msg: str) -> str:
+    """Call the Anthropic Messages API format."""
+    resp = requests.post(
+        f"{base_url.rstrip('/')}/messages",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01",
+        },
+        json={
+            "model": model,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_msg}],
+            "max_tokens": 1024,
+            "temperature": 0.3,
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    blocks = data.get("content", [])
+    texts = [b["text"] for b in blocks if isinstance(b, dict) and b.get("type") == "text"]
+    return "\n".join(texts) if texts else ""
+
+
+def _call_chat_api(base_url: str, api_key: str, model: str, system_prompt: str, user_msg: str) -> str:
+    """Call the OpenAI Chat Completions API format."""
+    resp = requests.post(
+        f"{base_url.rstrip('/')}/chat/completions",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_msg},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 1024,
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data["choices"][0]["message"]["content"]
+
+
 @router.post("")
 def chat(req: ChatRequest):
     """Send a message to BankBot. Uses dashboard data as context."""
     if not settings.openai_api_key or not settings.openai_base_url:
         raise HTTPException(status_code=400, detail="BankBot not configured. Set OPENAI_API_KEY and OPENAI_BASE_URL in .env")
 
-    model = req.model or "gpt-4o-mini"
+    model = req.model or "glm-5.1"
 
     # Collect dashboard context
     context = _collect_dashboard_context()
-
     system_prompt = (
         "You are BankBot, a helpful financial assistant for Roan's Banking Dashboard. "
         "You have access to the user's banking data below. Answer questions about their "
@@ -108,27 +162,17 @@ def chat(req: ChatRequest):
     )
 
     try:
-        resp = requests.post(
-            f"{settings.openai_base_url.rstrip('/')}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {settings.openai_api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": req.message},
-                ],
-                "temperature": 0.3,
-                "max_tokens": 1024,
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        choice = data["choices"][0]
-        return {"reply": choice["message"]["content"]}
+        if _model_uses_messages_api(model):
+            reply = _call_messages_api(
+                settings.openai_base_url, settings.openai_api_key,
+                model, system_prompt, req.message,
+            )
+        else:
+            reply = _call_chat_api(
+                settings.openai_base_url, settings.openai_api_key,
+                model, system_prompt, req.message,
+            )
+        return {"reply": reply}
     except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=502, detail=f"LLM API error: {str(e)}")
     except (KeyError, IndexError, json.JSONDecodeError) as e:
