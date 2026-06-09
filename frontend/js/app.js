@@ -468,12 +468,8 @@ const Pages = {
     page.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading...</p></div>`;
 
     try {
-      const [banksData, connsData] = await Promise.all([
-        API.get("/api/auth/banks"),
-        API.get("/api/auth/connections"),
-      ]);
-      const banks = banksData.banks || [];
-      const connections = connsData.connections || [];
+      const data = await API.get("/api/auth/banks");
+      const banks = data.banks || [];
 
       const banksHtml = banks.map((b) => {
         const id = b.bic || b.name;
@@ -485,33 +481,14 @@ const Pages = {
         </div>`;
       }).join("");
 
-      const connHtml = connections.map((c) => {
-        const created = new Date(c.created_at + "Z").toLocaleDateString();
-        return `<div class="connection-item">
-          <div class="connection-info">
-            <span class="connection-name">${c.bank_name}</span>
-            <span class="connection-meta">${c.account_count} account${c.account_count !== 1 ? "s" : ""} · connected ${created}</span>
-          </div>
-          <button class="btn btn-danger btn-sm" onclick="deleteConnection(${c.id})">Disconnect</button>
-        </div>`;
-      }).join("");
-
       page.innerHTML = `
-        <div class="connect-layout">
-          <div class="connect-section">
-            <h2>Connect a bank</h2>
-            <p>Select your bank to connect via Open Banking (PSD2).</p>
-            <input type="text" id="bankSearch" placeholder="Search banks..." class="search-input"
-              oninput="filterBanks()">
-            <div id="bankList" class="bank-list">
-              ${banks.length === 0 ? '<p class="empty-state">No banks available. Check Enable Banking config.</p>' : banksHtml}
-            </div>
-          </div>
-          <div class="connect-section">
-            <h2>Connected banks</h2>
-            <div id="connectionsList" class="connections-list">
-              ${connections.length === 0 ? '<p class="empty-state">No banks connected yet.</p>' : connHtml}
-            </div>
+        <div class="connect-container">
+          <h2>Connect a bank</h2>
+          <p>Select your bank to connect via Open Banking (PSD2).<br>Already connected? Go to <a href="#banks" style="color:var(--accent);">Banks</a> to manage them.</p>
+          <input type="text" id="bankSearch" placeholder="Search banks..." class="search-input"
+            oninput="filterBanks()">
+          <div id="bankList" class="bank-list">
+            ${banks.length === 0 ? '<p class="empty-state">No banks available. Check Enable Banking config.</p>' : banksHtml}
           </div>
         </div>`;
     } catch (e) {
