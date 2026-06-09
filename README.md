@@ -148,7 +148,3 @@ Some sandbox banks return empty transaction sets. Try a different bank or switch
 
 **BankBot says "not configured"**
 Add `OPENAI_API_KEY` and `OPENAI_BASE_URL` to your `.env`.
-
-## License
-
-All Rights Reserved.
