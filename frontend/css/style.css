@@ -498,8 +498,77 @@ tr:hover { background: var(--bg-card-hover); }
 }
 .connection-name {
   font-weight: 500;
-  display: block;
 }
+
+/* Banks page */
+.banks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.bank-group {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.bank-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.bank-group-info {
+  flex: 1;
+}
+.bank-group-name {
+  font-size: 16px;
+  font-weight: 600;
+}
+.bank-group-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.bank-group-total {
+  font-size: 18px;
+  font-weight: 700;
+  text-align: right;
+}
+.bank-account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px 12px 32px;
+  border-bottom: 1px solid var(--border);
+}
+.bank-account-row:last-child {
+  border-bottom: none;
+}
+.bank-account-name {
+  font-size: 14px;
+  font-weight: 500;
+}
+.bank-account-iban {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+.bank-account-balance {
+  font-size: 15px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.page-subheader {
+  margin-bottom: 20px;
+}
+.page-subheader p {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
 .connection-meta {
   font-size: 12px;
   color: var(--text-muted);

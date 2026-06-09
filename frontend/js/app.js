@@ -523,7 +523,87 @@ const Pages = {
         </div>`;
     }
   },
+  async banks() {
+    const page = document.getElementById("page-content");
+    page.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading banks...</p></div>`;
+
+    try {
+      const data = await API.get("/api/accounts/banks");
+      const banks = data.banks || [];
+
+      if (banks.length === 0) {
+        page.innerHTML = `
+          <div class="empty-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
+            <p>No banks connected yet.</p>
+            <p style="font-size:13px;margin-top:4px;"><a href="#connect" style="color:var(--accent);">Connect a bank</a> to get started.</p>
+          </div>`;
+        return;
+      }
+
+      let html = "";
+      for (const bank of banks) {
+        const total = new Intl.NumberFormat("en-EU", {
+          style: "currency",
+          currency: "EUR",
+        }).format(bank.total_balance || 0);
+
+        let accountsHtml = "";
+        for (const acc of bank.accounts || []) {
+          const bal = new Intl.NumberFormat("en-EU", {
+            style: "currency",
+            currency: acc.currency || "EUR",
+          }).format(acc.balance || 0);
+
+          const signClass = (acc.balance || 0) >= 0 ? "balance-positive" : "balance-negative";
+          accountsHtml += `
+            <div class="bank-account-row">
+              <div class="bank-account-info">
+                <div class="bank-account-name">${acc.name}</div>
+                <div class="bank-account-iban">${acc.iban ? acc.iban.slice(0, 22) + "..." : acc.account_type || ""}</div>
+              </div>
+              <div class="bank-account-balance ${signClass}">${bal}</div>
+            </div>`;
+        }
+
+        const created = new Date(bank.created_at + "Z").toLocaleDateString();
+
+        html += `
+          <div class="bank-group">
+            <div class="bank-group-header">
+              <div class="bank-group-info">
+                <div class="bank-group-name">${bank.bank_name}</div>
+                <div class="bank-group-meta">${bank.accounts.length} account${bank.accounts.length !== 1 ? "s" : ""} · connected ${created}</div>
+              </div>
+              <div class="bank-group-total">${total}</div>
+              <button class="btn btn-danger btn-sm" onclick="deleteBank(${bank.id})">Disconnect</button>
+            </div>
+            ${accountsHtml}
+          </div>`;
+      }
+
+      page.innerHTML = `
+        <div class="page-subheader">
+          <p>Manage your connected bank accounts.</p>
+        </div>
+        <div class="banks-list">${html}</div>`;
+    } catch (e) {
+      page.innerHTML = `<div class="error-banner">Could not load banks: ${e.message}</div>`;
+    }
+  },
 };
+
+// Delete bank
+async function deleteBank(id) {
+  if (!confirm("Disconnect this bank and remove its data?")) return;
+  try {
+    await fetch(`/api/auth/connections/${id}`, { method: "DELETE" });
+    // Re-render the banks page
+    Pages.banks();
+  } catch (e) {
+    console.error("Delete error:", e);
+  }
+}
 
 // Navigation
 function navigate(page) {
@@ -531,7 +611,7 @@ function navigate(page) {
   const navEl = document.querySelector(`[data-page="${page}"]`);
   if (navEl) navEl.classList.add("active");
 
-  const titles = { home: "Dashboard", insights: "Insights", transactions: "Transactions", connect: "Connect Bank" };
+  const titles = { home: "Dashboard", insights: "Insights", transactions: "Transactions", connect: "Connect Bank", banks: "Banks" };
   document.getElementById("page-title").textContent = titles[page] || "Dashboard";
 
   if (Pages[page]) Pages[page]();
