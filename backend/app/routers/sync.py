@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from app.database import get_db
 from app.enable_banking import EnableBankingClient
 from datetime import datetime, timedelta
+from app.categorize import categorize
 
 router = APIRouter(prefix="/api", tags=["sync"])
 
@@ -119,10 +120,12 @@ def sync_all():
                     # Booking date
                     booking_date = tx.get("booking_date") or tx.get("bookingDate") or tx.get("value_date", "")
 
+                    category = categorize(counterparty or desc, desc)
+
                     conn.execute(
                         """INSERT OR REPLACE INTO transactions
-                           (id, account_id, amount, currency, description, booking_date, merchant_name, running_balance)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                           (id, account_id, amount, currency, description, booking_date, merchant_name, category, running_balance)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (
                             tx_id,
                             account["id"],
@@ -131,6 +134,7 @@ def sync_all():
                             counterparty or desc,
                             booking_date[:10] if booking_date else "",
                             counterparty,
+                            category,
                             None,
                         ),
                     )

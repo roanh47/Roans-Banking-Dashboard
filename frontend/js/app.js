@@ -6,7 +6,40 @@ const API = {
     if (!res.ok) throw new Error(`API error: ${res.status}`);
     return res.json();
   },
+  async post(path, body) {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(err || `API error: ${res.status}`);
+    }
+    return res.json();
+  },
+  async put(path, body) {
+    const res = await fetch(path, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    return res.json();
+  },
 };
+
+// AI Settings cache
+let aiSettings = null;
+
+async function loadAiSettings() {
+  try {
+    aiSettings = await API.get("/api/ai/settings");
+  } catch {
+    aiSettings = { location: "sidebar", endpoint: "", api_key: "", model: "" };
+  }
+  return aiSettings;
+}
 
 // Page Renderers
 const Pages = {
@@ -97,7 +130,6 @@ const Pages = {
         </div>
       `;
 
-      // Fetch additional data for charts
       this._loadCharts();
       this._loadTopMerchants();
     } catch (e) {
@@ -117,7 +149,6 @@ const Pages = {
         API.get("/api/insights/spending"),
       ]);
 
-      // Monthly bar chart
       const months = (monthly.months || []).reverse();
       if (months.length && document.getElementById("monthlyChart")) {
         new Chart(document.getElementById("monthlyChart"), {
@@ -170,30 +201,22 @@ const Pages = {
         });
       }
 
-      // Spending category donut
       if (spending.insights?.length && document.getElementById("categoryChart")) {
         const colors = {
-          food: "#ff6b6b",
-          transport: "#5b9aff",
-          shopping: "#6c5ce7",
-          housing: "#ff9f43",
-          entertainment: "#ff7675",
-          health: "#74b9ff",
-          transfer: "#ffa726",
-          income: "#00d68f",
-          other: "#8888a0",
+          food: "#ff6b6b", transport: "#5b9aff", shopping: "#6c5ce7",
+          housing: "#ff9f43", entertainment: "#ff7675", health: "#74b9ff",
+          transfer: "#ffa726", income: "#00d68f", other: "#8888a0",
+          dining: "#e17055", subscriptions: "#a29bfe",
         };
         new Chart(document.getElementById("categoryChart"), {
           type: "doughnut",
           data: {
             labels: spending.insights.map((s) => s.category.charAt(0).toUpperCase() + s.category.slice(1)),
-            datasets: [
-              {
-                data: spending.insights.map((s) => s.total),
-                backgroundColor: spending.insights.map((s) => colors[s.category] || "#8888a0"),
-                borderWidth: 0,
-              },
-            ],
+            datasets: [{
+              data: spending.insights.map((s) => s.total),
+              backgroundColor: spending.insights.map((s) => colors[s.category] || "#8888a0"),
+              borderWidth: 0,
+            }],
           },
           options: {
             responsive: true,
@@ -209,7 +232,6 @@ const Pages = {
         });
       }
 
-      // Update monthly stats
       if (months.length > 0) {
         const latest = months[months.length - 1];
         const elIncome = document.getElementById("monthIncome");
@@ -238,13 +260,11 @@ const Pages = {
         return;
       }
       list.innerHTML = data.merchants
-        .map(
-          (m) => `
+        .map((m) => `
         <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">
           <span>${m.merchant}</span>
           <span style="font-weight:600;color:var(--red);">-€${m.total.toLocaleString()}</span>
-        </div>`
-        )
+        </div>`)
         .join("");
     } catch (e) {
       console.error("Merchants error:", e);
@@ -289,12 +309,12 @@ const Pages = {
         </div>
       `;
 
-      // Category donut
       if (spending.insights?.length) {
         const colors = {
           food: "#ff6b6b", transport: "#5b9aff", shopping: "#6c5ce7",
           housing: "#ff9f43", entertainment: "#ff7675", health: "#74b9ff",
           transfer: "#ffa726", income: "#00d68f", other: "#8888a0",
+          dining: "#e17055", subscriptions: "#a29bfe",
         };
         new Chart(document.getElementById("insightCategoryChart"), {
           type: "doughnut",
@@ -316,7 +336,6 @@ const Pages = {
         });
       }
 
-      // Monthly bar chart
       const months = (monthly.months || []).reverse();
       if (months.length) {
         new Chart(document.getElementById("insightMonthlyChart"), {
@@ -358,20 +377,16 @@ const Pages = {
         });
       }
 
-      // Category table
       const tbody = document.getElementById("categoryTableBody");
       if (spending.insights?.length && tbody) {
-        const totalSpend = spending.insights.reduce((s, c) => s + c.total, 0);
         tbody.innerHTML = spending.insights
-          .map(
-            (s) => `
+          .map((s) => `
           <tr>
             <td><span class="category-badge ${s.category}">${s.category}</span></td>
             <td style="font-weight:600;">€${s.total.toLocaleString()}</td>
             <td>${s.count} transactions</td>
             <td>€${(s.total / s.count).toFixed(2)}</td>
-          </tr>`
-          )
+          </tr>`)
           .join("");
       }
     } catch (e) {
@@ -442,7 +457,6 @@ const Pages = {
       let allTx = data.transactions;
       tbody.innerHTML = allTx.map(renderTx).join("");
 
-      // Search + filter
       document.getElementById("txSearch").addEventListener("input", filterTx);
       document.getElementById("txCategory").addEventListener("change", filterTx);
 
@@ -500,6 +514,7 @@ const Pages = {
         </div>`;
     }
   },
+
   async banks() {
     const page = document.getElementById("page-content");
     page.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading banks...</p></div>`;
@@ -620,9 +635,427 @@ const Pages = {
       page.innerHTML = `<div class="error-banner">Could not load banks: ${e.message}</div>`;
     }
   },
+
+  // ── AI Page ─────────────────────────────────────────────────────────
+  async ai() {
+    const page = document.getElementById("page-content");
+
+    if (!aiSettings) await loadAiSettings();
+
+    const configured = aiSettings.endpoint && aiSettings.api_key;
+    const selectedModel = aiSettings.model || "";
+
+    page.innerHTML = `
+      <div class="ai-page">
+        <!-- Categorize Section -->
+        <div class="card" style="margin-bottom:20px;">
+          <div class="card-header">
+            <span class="card-title">Auto-Categorize Transactions</span>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <select id="ai-cat-model" class="bankbot-model-select" style="max-width:200px;">
+                <option value="">${selectedModel || "Loading models..."}</option>
+              </select>
+              <button class="btn btn-primary btn-sm" id="btn-categorize" onclick="runCategorize()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1a3 3 0 0 1 3 3v1a2 2 0 0 1-2 2h-1l1 5H7l1-5H7a2 2 0 0 1-2-2v-1a3 3 0 0 1 3-3V6a4 4 0 0 1 4-4z"/></svg>
+                Categorize with AI
+              </button>
+            </div>
+          </div>
+          ${!configured ? '<p style="color:var(--orange);font-size:13px;">⚠ AI not configured yet. <a href="#ai-settings" style="color:var(--accent);">Set up AI Settings</a> first.</p>' : '<p style="color:var(--text-muted);font-size:13px;">Uses your configured AI model to suggest categories. You review before applying.</p>'}
+          <div id="categorize-results"></div>
+        </div>
+
+        <!-- Chat Section -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">BankBot Chat</span>
+            <select id="ai-chat-model" class="bankbot-model-select" style="max-width:200px;">
+              <option value="">${selectedModel || "Loading models..."}</option>
+            </select>
+          </div>
+          <div id="ai-chat-messages" class="ai-chat-messages">
+            <div class="bankbot-msg bankbot-bot">
+              <div class="bankbot-bubble">Hi! I'm BankBot. Ask me anything about your finances.</div>
+            </div>
+          </div>
+          <div class="bankbot-input-area">
+            <input type="text" id="ai-chat-input" placeholder="Ask about your money..." />
+            <button id="ai-chat-send" class="btn btn-primary btn-sm" onclick="sendAiChat()">Send</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Load models into both dropdowns
+    loadAiModels();
+
+    // Chat enter key
+    document.getElementById("ai-chat-input").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") sendAiChat();
+    });
+  },
+
+  // ── AI Settings Page ────────────────────────────────────────────────
+  async aiSettings() {
+    const page = document.getElementById("page-content");
+    page.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading settings...</p></div>`;
+
+    if (!aiSettings) await loadAiSettings();
+
+    page.innerHTML = `
+      <div class="ai-settings-page">
+        <div class="card" style="margin-bottom:20px;">
+          <div class="card-header">
+            <span class="card-title">AI Configuration</span>
+          </div>
+
+          <div class="settings-group">
+            <label class="settings-label">AI Location</label>
+            <p class="settings-hint">Where the AI chat appears</p>
+            <select id="setting-location" class="settings-select">
+              <option value="sidebar" ${aiSettings.location === "sidebar" ? "selected" : ""}>Sidebar (AI tab)</option>
+              <option value="bubble" ${aiSettings.location === "bubble" ? "selected" : ""}>Chat Bubble</option>
+              <option value="both" ${aiSettings.location === "both" ? "selected" : ""}>Both</option>
+            </select>
+          </div>
+
+          <div class="settings-group">
+            <label class="settings-label">API Endpoint</label>
+            <p class="settings-hint">OpenAI-compatible base URL (e.g. https://api.openai.com/v1 or https://openrouter.ai/api/v1)</p>
+            <input type="text" id="setting-endpoint" class="settings-input" placeholder="https://api.openai.com/v1" value="${escapeHtml(aiSettings.endpoint || "")}">
+          </div>
+
+          <div class="settings-group">
+            <label class="settings-label">API Key</label>
+            <p class="settings-hint">Your API key for the endpoint above</p>
+            <input type="password" id="setting-api-key" class="settings-input" placeholder="sk-..." value="${escapeHtml(aiSettings.api_key || "")}">
+          </div>
+
+          <div class="settings-group">
+            <label class="settings-label">Default Model</label>
+            <p class="settings-hint">Model to use for categorization and chat</p>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <select id="setting-model" class="settings-select" style="flex:1;">
+                <option value="">Select a model...</option>
+              </select>
+              <button class="btn btn-outline btn-sm" onclick="refreshModelsDropdown()">Refresh</button>
+            </div>
+          </div>
+
+          <div style="margin-top:24px;display:flex;gap:12px;">
+            <button class="btn btn-primary" onclick="saveAiSettings()">Save Settings</button>
+            <span id="settings-status" style="color:var(--green);font-size:13px;align-self:center;"></span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Load models
+    refreshModelsDropdown();
+  },
 };
 
-// Disconnect modal state
+// ── AI Helpers ────────────────────────────────────────────────────────
+
+async function loadAiModels() {
+  try {
+    const data = await API.get("/api/ai/models");
+    const models = data.models || [];
+    const opts = models.length
+      ? models.map((m) => `<option value="${m}">${m}</option>`).join("")
+      : '<option value="">No models found</option>';
+
+    // Update all model dropdowns on the page
+    ["ai-cat-model", "ai-chat-model"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.innerHTML = opts;
+        // Pre-select saved model
+        if (aiSettings?.model) {
+          el.value = aiSettings.model;
+        }
+      }
+    });
+  } catch {
+    ["ai-cat-model", "ai-chat-model"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = '<option value="">Models unavailable</option>';
+    });
+  }
+}
+
+async function refreshModelsDropdown() {
+  const el = document.getElementById("setting-model");
+  if (!el) return;
+  el.innerHTML = '<option value="">Loading...</option>';
+
+  // Temporarily save endpoint/key so the models endpoint can use them
+  const epEl = document.getElementById("setting-endpoint");
+  const keyEl = document.getElementById("setting-api-key");
+  if (epEl && keyEl) {
+    try {
+      await API.put("/api/ai/settings", {
+        endpoint: epEl.value,
+        api_key: keyEl.value,
+      });
+    } catch {}
+  }
+
+  try {
+    const data = await API.get("/api/ai/models");
+    const models = data.models || [];
+    if (models.length) {
+      el.innerHTML = '<option value="">Select a model...</option>' +
+        models.map((m) => `<option value="${m}" ${m === aiSettings?.model ? "selected" : ""}>${m}</option>`).join("");
+    } else {
+      el.innerHTML = '<option value="">No models found — check endpoint & key</option>';
+    }
+  } catch {
+    el.innerHTML = '<option value="">Failed to fetch models</option>';
+  }
+}
+
+async function saveAiSettings() {
+  const status = document.getElementById("settings-status");
+  try {
+    const updates = {
+      location: document.getElementById("setting-location").value,
+      endpoint: document.getElementById("setting-endpoint").value,
+      api_key: document.getElementById("setting-api-key").value,
+      model: document.getElementById("setting-model").value,
+    };
+    await API.put("/api/ai/settings", updates);
+    aiSettings = { ...aiSettings, ...updates };
+    status.textContent = "✓ Saved!";
+    status.style.color = "var(--green)";
+    setTimeout(() => { if (status) status.textContent = ""; }, 3000);
+  } catch (e) {
+    status.textContent = "✗ Failed: " + e.message;
+    status.style.color = "var(--red)";
+  }
+}
+
+// ── Categorize Logic ──────────────────────────────────────────────────
+
+async function runCategorize() {
+  const btn = document.getElementById("btn-categorize");
+  const results = document.getElementById("categorize-results");
+  const modelEl = document.getElementById("ai-cat-model");
+  const model = modelEl ? modelEl.value : "";
+
+  btn.disabled = true;
+  btn.textContent = "Categorizing...";
+  results.innerHTML = '<div class="loading" style="padding:20px;"><div class="spinner" style="width:24px;height:24px;"></div><p style="margin-top:8px;font-size:13px;">AI is analyzing your transactions...</p></div>';
+
+  try {
+    const data = await API.post("/api/ai/categorize", { model });
+
+    if (!data.suggestions?.length) {
+      results.innerHTML = '<p style="color:var(--text-muted);padding:16px;text-align:center;">No suggestions returned.</p>';
+      return;
+    }
+
+    const allCats = data.all_categories || data.existing_categories || [];
+    const catOptions = allCats.map((c) => `<option value="${c}">${c}</option>`).join("");
+
+    let html = `
+      <div style="margin-top:16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <span style="font-size:13px;color:var(--text-secondary);">${data.suggestions.length} transactions analyzed</span>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-outline btn-sm" onclick="resetCatSuggestions()">Reset</button>
+            <button class="btn btn-primary btn-sm" onclick="applyCatSuggestions()">Apply Selected</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:40px;"><input type="checkbox" id="cat-select-all" checked onchange="toggleAllCats(this)"></th>
+                <th>Date</th>
+                <th>Description</th>
+                <th>Current</th>
+                <th>Suggested</th>
+              </tr>
+            </thead>
+            <tbody id="cat-suggestions-body">
+    `;
+
+    data.suggestions.forEach((s, i) => {
+      const isNew = s.is_new_category;
+      html += `
+        <tr data-idx="${i}" data-id="${s.id}">
+          <td><input type="checkbox" class="cat-check" checked></td>
+          <td style="white-space:nowrap;color:var(--text-secondary);">${s.booking_date}</td>
+          <td>${escapeHtml(s.description)}</td>
+          <td><span class="category-badge ${s.current_category}">${s.current_category}</span></td>
+          <td>
+            <select class="cat-select settings-select" style="padding:4px 8px;font-size:12px;min-width:120px;">
+              ${allCats.map((c) => `<option value="${c}" ${c === s.suggested_category ? "selected" : ""}>${c}${c === s.suggested_category && isNew ? " (new)" : ""}</option>`).join("")}
+            </select>
+          </td>
+        </tr>`;
+    });
+
+    html += `</tbody></table></div></div>`;
+    results.innerHTML = html;
+
+    // Store data for apply
+    window._catSuggestions = data.suggestions;
+
+  } catch (e) {
+    results.innerHTML = `<div class="error-banner" style="margin-top:12px;">${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4v1a3 3 0 0 1 3 3v1a2 2 0 0 1-2 2h-1l1 5H7l1-5H7a2 2 0 0 1-2-2v-1a3 3 0 0 1 3-3V6a4 4 0 0 1 4-4z"/></svg> Categorize with AI`;
+  }
+}
+
+function toggleAllCats(master) {
+  document.querySelectorAll(".cat-check").forEach((cb) => { cb.checked = master.checked; });
+}
+
+function resetCatSuggestions() {
+  document.getElementById("categorize-results").innerHTML = "";
+  window._catSuggestions = null;
+}
+
+async function applyCatSuggestions() {
+  const rows = document.querySelectorAll("#cat-suggestions-body tr");
+  const updates = [];
+  rows.forEach((row) => {
+    const cb = row.querySelector(".cat-check");
+    if (!cb || !cb.checked) return;
+    const id = row.dataset.id;
+    const cat = row.querySelector(".cat-select").value;
+    if (id && cat) updates.push({ id, category: cat });
+  });
+
+  if (!updates.length) return;
+
+  try {
+    const result = await API.post("/api/ai/apply-categories", { updates });
+    document.getElementById("categorize-results").innerHTML = `
+      <div style="padding:16px;text-align:center;">
+        <p style="color:var(--green);font-weight:600;">✓ ${result.updated} transactions updated!</p>
+        <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="document.getElementById('categorize-results').innerHTML=''">Dismiss</button>
+      </div>`;
+  } catch (e) {
+    document.getElementById("categorize-results").innerHTML = `
+      <div class="error-banner" style="margin-top:12px;">Failed to apply: ${e.message}</div>`;
+  }
+}
+
+// ── Chat Logic (used in AI page) ─────────────────────────────────────
+
+async function sendAiChat() {
+  const input = document.getElementById("ai-chat-input");
+  const messages = document.getElementById("ai-chat-messages");
+  const modelEl = document.getElementById("ai-chat-model");
+  if (!input || !messages) return;
+
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = "";
+
+  // Add user message
+  const userDiv = document.createElement("div");
+  userDiv.className = "bankbot-msg bankbot-user";
+  userDiv.innerHTML = `<div class="bankbot-bubble">${escapeHtml(msg)}</div>`;
+  messages.appendChild(userDiv);
+  messages.scrollTop = messages.scrollHeight;
+
+  // Loading
+  const loadingDiv = document.createElement("div");
+  loadingDiv.className = "bankbot-msg bankbot-bot bankbot-loading";
+  loadingDiv.innerHTML = '<div class="bankbot-bubble">Thinking</div>';
+  messages.appendChild(loadingDiv);
+  messages.scrollTop = messages.scrollHeight;
+
+  const model = modelEl ? modelEl.value : "";
+
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: msg, model }),
+    });
+    loadingDiv.remove();
+    if (!res.ok) {
+      const err = await res.text();
+      addAiChatMsg("Error: " + err, false);
+      return;
+    }
+    const data = await res.json();
+    addAiChatMsg(data.reply || "(no response)", false);
+  } catch (e) {
+    loadingDiv.remove();
+    addAiChatMsg("Error: " + e.message, false);
+  }
+}
+
+function addAiChatMsg(text, isUser) {
+  const messages = document.getElementById("ai-chat-messages");
+  if (!messages) return;
+  const div = document.createElement("div");
+  div.className = "bankbot-msg " + (isUser ? "bankbot-user" : "bankbot-bot");
+  div.innerHTML = `<div class="bankbot-bubble">${isUser ? escapeHtml(text) : renderMarkdown(text)}</div>`;
+  messages.appendChild(div);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+// ── Shared Helpers ────────────────────────────────────────────────────
+
+function escapeHtml(text) {
+  const d = document.createElement("div");
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+function renderMarkdown(text) {
+  const d = document.createElement("div");
+  d.textContent = text;
+  let html = d.innerHTML;
+
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre style="background:var(--bg-secondary);padding:12px 16px;border-radius:8px;font-size:12px;overflow-x:auto;margin:8px 0;border:1px solid var(--border);"><code>$2</code></pre>');
+  html = html.replace(/^(&gt;|>) (.+)$/gm, '<blockquote style="border-left:3px solid var(--accent);padding:4px 12px;margin:8px 0;color:var(--text-secondary);">$2</blockquote>');
+  html = html.replace(/^### (.+)$/gm, "<h4 style='margin:12px 0 4px;font-size:14px;font-weight:600;'>$1</h4>");
+  html = html.replace(/^## (.+)$/gm, "<h3 style='margin:14px 0 4px;font-size:16px;font-weight:700;'>$1</h3>");
+  html = html.replace(/^# (.+)$/gm, "<h2 style='margin:16px 0 6px;font-size:18px;font-weight:700;'>$1</h2>");
+  html = html.replace(/^[-*_]{3,}$/gm, '<hr style="border:none;border-top:1px solid var(--border);margin:12px 0;">');
+  html = html.replace(/^[\s]*[-*][\s]+\[ \]\s+(.+)$/gm, '<label style="display:block;padding:2px 0;"><input type="checkbox" disabled> $1</label>');
+  html = html.replace(/^[\s]*[-*][\s]+\[[xX]\]\s+(.+)$/gm, '<label style="display:block;padding:2px 0;color:var(--text-muted);"><input type="checkbox" disabled checked> $1</label>');
+  html = html.replace(/^[\s]*[-*][\s]+(.+)$/gm, '• $1');
+  if (html.includes("|") && html.includes("\n")) {
+    html = html.replace(/\n?\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)+)/g, function(match, header, body) {
+      const headers = header.split("|").map(h => h.trim());
+      const rows = body.trim().split("\n").map(row => {
+        const cells = row.split("|").slice(1, -1).map(c => c.trim());
+        return "<tr>" + cells.map(c => "<td style='padding:4px 10px;border:1px solid var(--border);'>" + c + "</td>").join("") + "</tr>";
+      }).join("");
+      return "<table style='border-collapse:collapse;margin:8px 0;font-size:12px;width:100%;'>" +
+        "<thead><tr>" + headers.map(h => "<th style='padding:4px 10px;border:1px solid var(--border);text-align:left;'>" + h + "</th>").join("") + "</tr></thead>" +
+        "<tbody>" + rows + "</tbody></table>";
+    });
+  }
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  html = html.replace(/~~(.+?)~~/g, '<del style="color:var(--text-muted);">$1</del>');
+  html = html.replace(/`(.+?)`/g, '<code style="background:var(--bg-secondary);padding:2px 6px;border-radius:4px;font-size:12px;">$1</code>');
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none;">$1</a>');
+  html = html.replace(/\$\$(.+?)\$\$/g, '<span style="font-family:serif;font-style:italic;padding:0 4px;">[$1]</span>');
+  html = html.replace(/\$(.+?)\$/g, '<span style="font-family:serif;font-style:italic;padding:0 2px;">$1</span>');
+  html = html.replace(/\[\^(\w+)\]:\s(.+)/g, '<hr style="border:none;border-top:1px solid var(--border);margin:8px 0;"><small style="color:var(--text-muted);">[$1]: $2</small>');
+  html = html.replace(/\[\^(\w+)\]/g, '<sup style="color:var(--accent);font-size:10px;">[$1]</sup>');
+  html = html.replace(/\n\n/g, "</p><p style='margin:8px 0;'>");
+  html = "<p style='margin:0;'>" + html + "</p>";
+  html = html.replace(/\n/g, "<br>");
+
+  return html;
+}
+
+// ── Disconnect Modal ──────────────────────────────────────────────────
+
 let _disconnectId = null;
 
 function showDisconnectModal(id, bankName) {
@@ -660,7 +1093,10 @@ function navigate(page) {
   const navEl = document.querySelector(`[data-page="${page}"]`);
   if (navEl) navEl.classList.add("active");
 
-  const titles = { home: "Dashboard", insights: "Insights", transactions: "Transactions", connect: "Connect Bank", banks: "Banks" };
+  const titles = {
+    home: "Dashboard", insights: "Insights", transactions: "Transactions",
+    connect: "Connect Bank", banks: "Banks", ai: "AI", "ai-settings": "AI Settings",
+  };
   document.getElementById("page-title").textContent = titles[page] || "Dashboard";
 
   if (Pages[page]) Pages[page]();
@@ -691,7 +1127,7 @@ function filterBanksList() {
 
 // Sync
 async function syncAll() {
-  const btn = document.querySelector(".btn-primary");
+  const btn = document.querySelector(".header-actions .btn-primary");
   const original = btn.textContent;
   btn.textContent = "Syncing...";
   btn.disabled = true;
@@ -712,131 +1148,11 @@ window.addEventListener("hashchange", () => {
   navigate(page);
 });
 
-// --- BankBot ---
-
-function initBankBot() {
-  const toggle = document.getElementById("bankbot-toggle");
-  const chat = document.getElementById("bankbot-chat");
-  const close = document.getElementById("bankbot-close");
-  const input = document.getElementById("bankbot-input");
-  const send = document.getElementById("bankbot-send");
-  const messages = document.getElementById("bankbot-messages");
-  const modelSelect = document.getElementById("bankbot-model");
-
-  // Load models
-  API.get("/api/chat/models")
-    .then((data) => {
-      if (data.models?.length) {
-        modelSelect.innerHTML = data.models
-          .map((m) => `<option value="${m}">${m}</option>`)
-          .join("");
-      } else {
-        modelSelect.innerHTML = '<option value="">No models</option>';
-      }
-    })
-    .catch(() => {
-      modelSelect.innerHTML = '<option value="">Models unavailable</option>';
-    });
-
-  toggle.onclick = () => {
-    chat.classList.toggle("bankbot-hidden");
-    if (!chat.classList.contains("bankbot-hidden")) input.focus();
-  };
-  close.onclick = () => chat.classList.add("bankbot-hidden");
-
-  function addMessage(text, isUser) {
-    const div = document.createElement("div");
-    div.className = "bankbot-msg " + (isUser ? "bankbot-user" : "bankbot-bot");
-    div.innerHTML = `<div class="bankbot-bubble">${text}</div>`;
-    messages.appendChild(div);
-    messages.scrollTop = messages.scrollHeight;
-  }
-
-  async function sendMessage() {
-    const msg = input.value.trim();
-    if (!msg) return;
-    input.value = "";
-    addMessage(escapeHtml(msg), true);
-
-    // Loading indicator
-    const loadingDiv = document.createElement("div");
-    loadingDiv.className = "bankbot-msg bankbot-bot bankbot-loading";
-    loadingDiv.innerHTML = '<div class="bankbot-bubble">Thinking</div>';
-    messages.appendChild(loadingDiv);
-    messages.scrollTop = messages.scrollHeight;
-
-    const model = modelSelect.value || "";
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: msg, model }),
-      });
-      loadingDiv.remove();
-      if (!res.ok) {
-        const err = await res.text();
-        addMessage("Error: " + escapeHtml(err), false);
-        return;
-      }
-      const data = await res.json();
-      addMessage(renderMarkdown(data.reply || "(no response)"), false);
-    } catch (e) {
-      loadingDiv.remove();
-      addMessage("Error: " + escapeHtml(e.message), false);
-    }
-  }
-
-  send.onclick = sendMessage;
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") sendMessage();
-  });
-}
-
-function escapeHtml(text) {
-  const d = document.createElement("div");
-  d.textContent = text;
-  return d.innerHTML;
-}
-
-function renderMarkdown(text) {
-  // Escape HTML first, then convert markdown to HTML
-  const d = document.createElement("div");
-  d.textContent = text;
-  let html = d.innerHTML;
-  // Bold
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  // Italic
-  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
-  // Inline code
-  html = html.replace(/`(.+?)`/g, "<code style='background:var(--bg-secondary);padding:2px 6px;border-radius:4px;font-size:12px;'>$1</code>");
-  // Bullet lists
-  html = html.replace(/^[\s]*[-*][\s]+(.+)$/gm, "&bull; $1");
-  // Tables (simple pipe format) - convert to HTML table
-  if (html.includes("|") && html.includes("\n")) {
-    html = html.replace(/\n?\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)+)/g, function(match, header, body) {
-      const headers = header.split("|").map(h => h.trim());
-      const rows = body.trim().split("\n").map(row => {
-        const cells = row.split("|").slice(1, -1).map(c => c.trim());
-        return "<tr>" + cells.map(c => "<td style='padding:4px 10px;border:1px solid var(--border);'>" + c + "</td>").join("") + "</tr>";
-      }).join("");
-      return "<table style='border-collapse:collapse;margin:8px 0;font-size:12px;width:100%;'>" +
-        "<thead><tr>" + headers.map(h => "<th style='padding:4px 10px;border:1px solid var(--border);text-align:left;'>" + h + "</th>").join("") + "</tr></thead>" +
-        "<tbody>" + rows + "</tbody></table>";
-    });
-  }
-  // Line breaks (double newlines = paragraphs)
-  html = html.replace(/\n\n/g, "</p><p style='margin:8px 0;'>");
-  html = "<p style='margin:0;'>" + html + "</p>";
-  // Single newlines
-  html = html.replace(/\n/g, "<br>");
-  return html;
-}
-
 // Init
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
+  await loadAiSettings();
   const page = window.location.hash.replace("#", "") || "home";
   navigate(page);
-  initBankBot();
 });
 
 // Check for connection success
