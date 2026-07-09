@@ -887,6 +887,27 @@ tr:hover { background: var(--bg-card-hover); }
   gap: 10px;
 }
 
+#ai-chat-input {
+  flex: 1;
+  padding: 9px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+#ai-chat-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(108, 92, 231, 0.15);
+}
+
+#ai-chat-input::placeholder {
+  color: var(--text-muted);
+}
+
 /* AI Settings */
 .settings-group {
   margin-bottom: 20px;

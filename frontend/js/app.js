@@ -696,7 +696,7 @@ const Pages = {
   },
 
   // ── AI Settings Page ────────────────────────────────────────────────
-  async aiSettings() {
+  async "ai-settings"() {
     const page = document.getElementById("page-content");
     page.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading settings...</p></div>`;
 
