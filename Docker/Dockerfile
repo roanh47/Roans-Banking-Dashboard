@@ -5,14 +5,14 @@ WORKDIR /app
 # Install dependencies + openssl for key generation
 RUN apt-get update && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*
-COPY Backend/requirements.txt .
+COPY Docker/Backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy backend
-COPY Backend/ .
+COPY Docker/Backend/ .
 
 # Copy frontend (static files served by backend)
-COPY Frontend/ /app/static/
+COPY Docker/Frontend/ /app/static/
 
 # Entrypoint: auto-generates private key if missing
 COPY Docker/docker-entrypoint.sh /docker-entrypoint.sh
