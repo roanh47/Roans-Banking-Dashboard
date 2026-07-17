@@ -1,0 +1,32 @@
+// Roan's Banking App — Glass Dark Theme
+
+export const Colors = {
+  Background: '#0A0A0F',
+  Card: '#14141F',
+  CardBorder: '#1E1E2E',
+  Accent: '#6C5CE7',
+  AccentLight: '#A29BFE',
+  Green: '#00D68F',
+  Red: '#FF6B6B',
+  TextPrimary: '#E8E8F0',
+  TextSecondary: '#8888A0',
+  TextMuted: '#555566',
+  InputBg: '#1A1A2E',
+  InputBorder: '#2A2A3E',
+  TabActive: '#6C5CE7',
+  TabInactive: '#555566',
+  Overlay: 'rgba(10, 10, 15, 0.9)',
+  CategoryColors: {
+    food: '#FF6B6B',
+    transport: '#5B9AFF',
+    shopping: '#6C5CE7',
+    housing: '#FF9F43',
+    entertainment: '#FF7675',
+    health: '#74B9FF',
+    transfer: '#FFA726',
+    income: '#00D68F',
+    dining: '#E17055',
+    subscriptions: '#A29BFE',
+    other: '#8888A0',
+  } as Record<string, string>,
+};

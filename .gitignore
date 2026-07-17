@@ -27,3 +27,15 @@ Thumbs.db
 # Database
 *.sqlite3
 *.db
+
+# Expo / React Native
+App/node_modules/
+App/android/
+App/.expo/
+App/ios/
+*.hbc
+.expo/
+
+# APK builds (except releases)
+*.apk
+!App/Releases/*.apk

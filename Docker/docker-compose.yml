@@ -1,12 +1,14 @@
 services:
   app:
-    build: .
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile
     container_name: roans-banking-dashboard
     ports:
       - "8200:8200"
     volumes:
-      - ./config/:/app/config/
-      - ./.env:/app/.env:ro
+      - ../config/:/app/config/
+      - ../.env:/app/.env:ro
       - data:/app/data
     restart: unless-stopped
 
