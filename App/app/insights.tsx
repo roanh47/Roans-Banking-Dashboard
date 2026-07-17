@@ -6,22 +6,17 @@ import {
 import { BarChart } from 'react-native-chart-kit';
 import { Colors } from '../src/Theme/Colors';
 import SpendingChart from '../src/Components/SpendingChart';
-import { fetchSpendingInsights, fetchMonthlyInsights, SpendingInsight, MonthlyData } from '../src/API/Client';
+import { getLocalTransactions, Transaction } from '../src/API/Client';
 
 const screenWidth = Dimensions.get('window').width;
 
 export default function InsightsScreen() {
   const [refreshing, setRefreshing] = useState(false);
-  const [spending, setSpending] = useState<SpendingInsight[]>([]);
-  const [months, setMonths] = useState<MonthlyData[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
 
   const loadData = useCallback(async () => {
-    const [s, m] = await Promise.all([
-      fetchSpendingInsights(90),
-      fetchMonthlyInsights(),
-    ]);
-    setSpending(s.insights);
-    setMonths(m.months);
+    const txs = await getLocalTransactions();
+    setTransactions(txs);
   }, []);
 
   const onRefresh = useCallback(async () => {
@@ -32,7 +27,31 @@ export default function InsightsScreen() {
 
   React.useEffect(() => { loadData(); }, [loadData]);
 
-  const reversed = [...months].reverse();
+  // Spending by category (last 90 days)
+  const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const recentTxs = transactions.filter(t => t.booking_date >= cutoff);
+  const categoryTotals: Record<string, { total: number; count: number }> = {};
+  recentTxs.filter(t => t.amount < 0).forEach(t => {
+    const cat = t.category || 'other';
+    if (!categoryTotals[cat]) categoryTotals[cat] = { total: 0, count: 0 };
+    categoryTotals[cat].total += Math.abs(t.amount);
+    categoryTotals[cat].count += 1;
+  });
+  const spending = Object.entries(categoryTotals)
+    .map(([category, data]) => ({ category, total: data.total, count: data.count }))
+    .sort((a, b) => b.total - a.total);
+
+  // Monthly data
+  const monthlyData: Record<string, { income: number; spending: number }> = {};
+  transactions.forEach(t => {
+    const month = t.booking_date?.slice(0, 7);
+    if (!month) return;
+    if (!monthlyData[month]) monthlyData[month] = { income: 0, spending: 0 };
+    if (t.amount > 0) monthlyData[month].income += t.amount;
+    else monthlyData[month].spending += Math.abs(t.amount);
+  });
+  const months = Object.entries(monthlyData).sort(([a], [b]) => a.localeCompare(b)).slice(-6);
+  const fmt = (n: number) => new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(n);
 
   return (
     <ScrollView
@@ -44,25 +63,23 @@ export default function InsightsScreen() {
         <Text style={styles.subtitle}>Last 90 days</Text>
       </View>
 
-      {/* Spending Doughnut */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Spending Breakdown</Text>
         <SpendingChart data={spending} />
       </View>
 
-      {/* Monthly Bar Chart */}
-      {reversed.length > 0 ? (
+      {months.length > 0 ? (
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Income vs Spending</Text>
           <BarChart
             data={{
-              labels: reversed.map(m => {
-                const [, mo] = m.month.split('-');
+              labels: months.map(([m]) => {
+                const [, mo] = m.split('-');
                 return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(mo)-1];
               }),
               datasets: [
-                { data: reversed.map(m => m.income) },
-                { data: reversed.map(m => m.spending) },
+                { data: months.map(([, m]) => m.income) },
+                { data: months.map(([, m]) => m.spending) },
               ],
             }}
             width={screenWidth - 48}
@@ -83,7 +100,6 @@ export default function InsightsScreen() {
         </View>
       ) : null}
 
-      {/* Category Table */}
       <View style={styles.card}>
         <Text style={styles.cardTitle}>All Categories</Text>
         <View style={styles.tableHeader}>
@@ -99,18 +115,12 @@ export default function InsightsScreen() {
                 <View style={[styles.dot, { backgroundColor: catColor }]} />
                 <Text style={styles.td}>{s.category.charAt(0).toUpperCase() + s.category.slice(1)}</Text>
               </View>
-              <Text style={[styles.td, { flex: 1, textAlign: 'right', fontWeight: '600' }]}>
-                {new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(s.total)}
-              </Text>
-              <Text style={[styles.td, { flex: 1, textAlign: 'right', color: Colors.TextMuted }]}>
-                {s.count}
-              </Text>
+              <Text style={[styles.td, { flex: 1, textAlign: 'right', fontWeight: '600' }]}>{fmt(s.total)}</Text>
+              <Text style={[styles.td, { flex: 1, textAlign: 'right', color: Colors.TextMuted }]}>{s.count}</Text>
             </View>
           );
         })}
-        {spending.length === 0 ? (
-          <Text style={styles.emptyText}>No spending data</Text>
-        ) : null}
+        {spending.length === 0 ? <Text style={styles.emptyText}>No spending data</Text> : null}
       </View>
 
       <View style={{ height: 24 }} />

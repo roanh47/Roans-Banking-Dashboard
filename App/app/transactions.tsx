@@ -6,7 +6,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../src/Theme/Colors';
 import TransactionRow from '../src/Components/TransactionRow';
-import { fetchTransactions, Transaction } from '../src/API/Client';
+import { getLocalTransactions, Transaction } from '../src/API/Client';
 
 export default function TransactionsScreen() {
   const [refreshing, setRefreshing] = useState(false);
@@ -16,9 +16,9 @@ export default function TransactionsScreen() {
   const [categories, setCategories] = useState<string[]>([]);
 
   const loadData = useCallback(async () => {
-    const data = await fetchTransactions(100, 90);
-    setTransactions(data.transactions);
-    const cats = [...new Set(data.transactions.map(t => t.category || 'other'))].sort();
+    const txs = await getLocalTransactions();
+    setTransactions(txs);
+    const cats = [...new Set(txs.map(t => t.category || 'other'))].sort();
     setCategories(cats);
   }, []);
 
@@ -38,13 +38,11 @@ export default function TransactionsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Transactions</Text>
-        <Text style={styles.subtitle}>{transactions.length} transactions (last 90 days)</Text>
+        <Text style={styles.subtitle}>{transactions.length} transactions</Text>
       </View>
 
-      {/* Search & Filter */}
       <View style={styles.filterRow}>
         <View style={styles.searchBox}>
           <Ionicons name="search" size={16} color={Colors.TextMuted} />
@@ -77,7 +75,6 @@ export default function TransactionsScreen() {
         </ScrollView>
       </View>
 
-      {/* Transaction List */}
       <ScrollView
         style={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.Accent} />}
@@ -94,7 +91,9 @@ export default function TransactionsScreen() {
         )) : (
           <View style={styles.empty}>
             <Ionicons name="document-text-outline" size={40} color={Colors.TextMuted} />
-            <Text style={styles.emptyText}>No transactions found</Text>
+            <Text style={styles.emptyText}>
+              {transactions.length === 0 ? 'No transactions yet. Connect a bank to sync.' : 'No matching transactions'}
+            </Text>
           </View>
         )}
         <View style={{ height: 24 }} />
@@ -114,22 +113,16 @@ const styles = StyleSheet.create({
     borderRadius: 10, borderWidth: 1, borderColor: Colors.InputBorder,
     paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8,
   },
-  searchInput: {
-    flex: 1, color: Colors.TextPrimary, fontSize: 14, marginLeft: 8,
-    padding: 0,
-  },
+  searchInput: { flex: 1, color: Colors.TextPrimary, fontSize: 14, marginLeft: 8, padding: 0 },
   catScroll: { flexDirection: 'row' },
   catChip: {
     paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
-    backgroundColor: Colors.InputBg, borderWidth: 1, borderColor: Colors.InputBorder,
-    marginRight: 6,
+    backgroundColor: Colors.InputBg, borderWidth: 1, borderColor: Colors.InputBorder, marginRight: 6,
   },
-  catChipActive: {
-    backgroundColor: Colors.Accent + '33', borderColor: Colors.Accent,
-  },
+  catChipActive: { backgroundColor: Colors.Accent + '33', borderColor: Colors.Accent },
   catChipText: { color: Colors.TextSecondary, fontSize: 12 },
   catChipTextActive: { color: Colors.Accent, fontWeight: '600' },
   list: { flex: 1 },
   empty: { alignItems: 'center', paddingTop: 60, gap: 8 },
-  emptyText: { color: Colors.TextMuted, fontSize: 14 },
+  emptyText: { color: Colors.TextMuted, fontSize: 14, textAlign: 'center', paddingHorizontal: 32 },
 });

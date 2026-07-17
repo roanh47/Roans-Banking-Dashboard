@@ -6,31 +6,19 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../src/Theme/Colors';
-import {
-  getSettings, saveSettings, testConnection, AppSettings,
-  fetchConnections, deleteConnection, fetchAiModels, BankConnection,
-} from '../src/API/Client';
+import { getSettings, saveSettings, fetchAiModels, AppSettings } from '../src/API/Client';
 
 export default function ProfileScreen() {
   const [settings, setSettings] = useState<AppSettings>({
-    ServerUrl: '', EnableBankingAppId: '', AiEndpoint: '', AiApiKey: '', AiModel: '',
+    EnableBankingAppId: '', EnableBankingKey: '', AiEndpoint: '', AiApiKey: '', AiModel: '',
   });
-  const [connections, setConnections] = useState<BankConnection[]>([]);
   const [aiModels, setAiModels] = useState<string[]>([]);
-  const [testing, setTesting] = useState(false);
-  const [connected, setConnected] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const [showModels, setShowModels] = useState(false);
 
   const loadSettings = useCallback(async () => {
     const s = await getSettings();
     setSettings(s);
-    if (s.ServerUrl) {
-      try {
-        const conns = await fetchConnections();
-        setConnections(conns.connections);
-      } catch {}
-    }
   }, []);
 
   React.useEffect(() => { loadSettings(); }, [loadSettings]);
@@ -39,47 +27,21 @@ export default function ProfileScreen() {
     setSettings(prev => ({ ...prev, [key]: value }));
   };
 
-  const handleTestConnection = async () => {
-    setTesting(true);
-    const ok = await testConnection(settings.ServerUrl);
-    setConnected(ok);
-    setTesting(false);
-    if (ok) {
-      try {
-        const conns = await fetchConnections();
-        setConnections(conns.connections);
-      } catch {}
-    }
-  };
-
   const handleSave = async () => {
     setSaving(true);
     await saveSettings(settings);
     setSaving(false);
-    Alert.alert('Saved', 'Settings saved successfully.');
-  };
-
-  const handleDeleteConnection = (id: number, name: string) => {
-    Alert.alert('Delete', `Remove ${name}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete', style: 'destructive',
-        onPress: async () => {
-          await deleteConnection(id);
-          setConnections(prev => prev.filter(c => c.id !== id));
-        },
-      },
-    ]);
+    Alert.alert('Saved', 'Settings saved.');
   };
 
   const handleFetchModels = async () => {
     if (!settings.AiEndpoint) return;
     try {
-      const data = await fetchAiModels();
-      setAiModels(data.models);
+      const models = await fetchAiModels();
+      setAiModels(models);
       setShowModels(true);
     } catch {
-      Alert.alert('Error', 'Could not fetch models from AI endpoint.');
+      Alert.alert('Error', 'Could not fetch models.');
     }
   };
 
@@ -87,40 +49,6 @@ export default function ProfileScreen() {
     <ScrollView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Profile & Settings</Text>
-      </View>
-
-      {/* ── Server Connection ── */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Server</Text>
-        <View style={styles.card}>
-          <Text style={styles.label}>Server URL</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="https://banking.example.com"
-            placeholderTextColor={Colors.TextMuted}
-            value={settings.ServerUrl}
-            onChangeText={v => update('ServerUrl', v)}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-          />
-
-          {/* Connection Status */}
-          <View style={styles.statusRow}>
-            <View style={[styles.dot, { backgroundColor: connected === true ? Colors.Green : connected === false ? Colors.Red : Colors.TextMuted }]} />
-            <Text style={styles.statusText}>
-              {connected === true ? 'Connected' : connected === false ? 'Cannot reach server' : 'Not tested'}
-            </Text>
-          </View>
-
-          <TouchableOpacity style={styles.testBtn} onPress={handleTestConnection} disabled={testing || !settings.ServerUrl}>
-            {testing ? (
-              <ActivityIndicator size="small" color={Colors.Accent} />
-            ) : (
-              <Text style={styles.testBtnText}>Test Connection</Text>
-            )}
-          </TouchableOpacity>
-        </View>
       </View>
 
       {/* ── Enable Banking ── */}
@@ -138,25 +66,17 @@ export default function ProfileScreen() {
             autoCorrect={false}
           />
 
-          {connections.length > 0 ? (
-            <>
-              <Text style={[styles.label, { marginTop: 16 }]}>Linked Banks</Text>
-              {connections.map(c => (
-                <View key={c.id} style={styles.connectionRow}>
-                  <View style={styles.connectionInfo}>
-                    <Ionicons name="card" size={16} color={Colors.Accent} />
-                    <Text style={styles.connectionName}>{c.bank_name}</Text>
-                    <Text style={styles.connectionSub}>{c.account_count} account{c.account_count !== 1 ? 's' : ''}</Text>
-                  </View>
-                  <TouchableOpacity onPress={() => handleDeleteConnection(c.id, c.bank_name)}>
-                    <Ionicons name="trash-outline" size={18} color={Colors.Red} />
-                  </TouchableOpacity>
-                </View>
-              ))}
-            </>
-          ) : (
-            <Text style={styles.hint}>No banks linked. Connect via the web dashboard first.</Text>
-          )}
+          <Text style={[styles.label, { marginTop: 12 }]}>Private Key (.pem)</Text>
+          <TextInput
+            style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
+            placeholder="Paste your private key here"
+            placeholderTextColor={Colors.TextMuted}
+            value={settings.EnableBankingKey}
+            onChangeText={v => update('EnableBankingKey', v)}
+            multiline
+            autoCapitalize="none"
+          />
+          <Text style={styles.hint}>Used to sign JWT requests to Enable Banking.</Text>
         </View>
       </View>
 
@@ -164,7 +84,7 @@ export default function ProfileScreen() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>AI / BankBot</Text>
         <View style={styles.card}>
-          <Text style={styles.label}>AI Endpoint</Text>
+          <Text style={styles.label}>Endpoint</Text>
           <TextInput
             style={styles.input}
             placeholder="https://api.openai.com/v1"
@@ -257,21 +177,11 @@ const styles = StyleSheet.create({
     color: Colors.TextPrimary, fontSize: 14,
   },
   hint: { color: Colors.TextMuted, fontSize: 12, marginTop: 8 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12, gap: 8 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  statusText: { color: Colors.TextSecondary, fontSize: 13 },
   testBtn: {
     backgroundColor: Colors.Accent + '22', borderRadius: 8, paddingVertical: 10,
     alignItems: 'center', marginTop: 12, borderWidth: 1, borderColor: Colors.Accent + '44',
   },
   testBtnText: { color: Colors.Accent, fontSize: 14, fontWeight: '600' },
-  connectionRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.CardBorder,
-  },
-  connectionInfo: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  connectionName: { color: Colors.TextPrimary, fontSize: 14, fontWeight: '500' },
-  connectionSub: { color: Colors.TextMuted, fontSize: 12 },
   modelList: {
     backgroundColor: Colors.InputBg, borderRadius: 8, borderWidth: 1,
     borderColor: Colors.InputBorder, marginBottom: 8, maxHeight: 150,

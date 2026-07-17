@@ -9,62 +9,74 @@ import { BarChart } from 'react-native-chart-kit';
 import { Colors } from '../src/Theme/Colors';
 import AccountCard from '../src/Components/AccountCard';
 import SpendingChart from '../src/Components/SpendingChart';
-import {
-  fetchAccountSummary, fetchAccounts, fetchMonthlyInsights,
-  fetchSpendingInsights, fetchTopMerchants, syncAll,
-  Account, MonthlyData, SpendingInsight, TopMerchant,
-} from '../src/API/Client';
+import { getLocalAccounts, getLocalTransactions, Account, Transaction } from '../src/API/Client';
 
 const screenWidth = Dimensions.get('window').width;
 
 export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
-  const [totalBalance, setTotalBalance] = useState(0);
-  const [accountCount, setAccountCount] = useState(0);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [months, setMonths] = useState<MonthlyData[]>([]);
-  const [spending, setSpending] = useState<SpendingInsight[]>([]);
-  const [merchants, setMerchants] = useState<TopMerchant[]>([]);
-  const [error, setError] = useState('');
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
 
   const loadData = useCallback(async () => {
-    try {
-      setError('');
-      const [summary, accData, monthly, spendData, merchantData] = await Promise.all([
-        fetchAccountSummary(),
-        fetchAccounts(),
-        fetchMonthlyInsights(),
-        fetchSpendingInsights(90),
-        fetchTopMerchants(30, 5),
-      ]);
-      setTotalBalance(summary.total_balance);
-      setAccountCount(summary.account_count);
-      setAccounts(accData.accounts);
-      setMonths(monthly.months);
-      setSpending(spendData.insights);
-      setMerchants(merchantData.merchants);
-    } catch (e: any) {
-      setError(e.message || 'Could not load data');
-    }
+    const [accs, txs] = await Promise.all([getLocalAccounts(), getLocalTransactions()]);
+    setAccounts(accs);
+    setTransactions(txs);
   }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    try { await syncAll(); } catch {}
     await loadData();
     setRefreshing(false);
   }, [loadData]);
 
   React.useEffect(() => { loadData(); }, [loadData]);
 
-  const latestMonth = months.length ? months[months.length - 1] : null;
+  const totalBalance = accounts.reduce((sum, a) => sum + a.balance, 0);
+  const now = new Date();
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const monthTxs = transactions.filter(t => t.booking_date?.startsWith(thisMonth));
+  const monthSpending = monthTxs.filter(t => t.amount < 0).reduce((sum, t) => sum + Math.abs(t.amount), 0);
+  const monthIncome = monthTxs.filter(t => t.amount > 0).reduce((sum, t) => sum + t.amount, 0);
+
+  // Spending by category
+  const categoryTotals: Record<string, number> = {};
+  transactions.filter(t => t.amount < 0).forEach(t => {
+    const cat = t.category || 'other';
+    categoryTotals[cat] = (categoryTotals[cat] || 0) + Math.abs(t.amount);
+  });
+  const spendingData = Object.entries(categoryTotals)
+    .map(([category, total]) => ({ category, total }))
+    .sort((a, b) => b.total - a.total);
+
+  // Top merchants
+  const merchantTotals: Record<string, number> = {};
+  transactions.filter(t => t.amount < 0 && t.merchant_name).forEach(t => {
+    merchantTotals[t.merchant_name] = (merchantTotals[t.merchant_name] || 0) + Math.abs(t.amount);
+  });
+  const topMerchants = Object.entries(merchantTotals)
+    .map(([merchant, total]) => ({ merchant, total }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5);
+
+  // Monthly data
+  const monthlyData: Record<string, { income: number; spending: number }> = {};
+  transactions.forEach(t => {
+    const month = t.booking_date?.slice(0, 7);
+    if (!month) return;
+    if (!monthlyData[month]) monthlyData[month] = { income: 0, spending: 0 };
+    if (t.amount > 0) monthlyData[month].income += t.amount;
+    else monthlyData[month].spending += Math.abs(t.amount);
+  });
+  const months = Object.entries(monthlyData).sort(([a], [b]) => b.localeCompare(a)).slice(0, 6);
+
+  const fmt = (n: number) => new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(n);
 
   return (
     <ScrollView
       style={styles.container}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.Accent} />}
     >
-      {/* Header */}
       <View style={styles.header}>
         <View>
           <Text style={styles.greeting}>Banking Dashboard</Text>
@@ -75,45 +87,31 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {error ? (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{error}</Text>
-        </View>
-      ) : null}
-
       {/* Net Worth */}
       <View style={styles.cardWide}>
         <Text style={styles.cardLabel}>Net Worth</Text>
-        <Text style={styles.cardAmount}>
-          {new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(totalBalance)}
-        </Text>
-        <Text style={styles.cardSub}>{accountCount} account{accountCount !== 1 ? 's' : ''}</Text>
+        <Text style={styles.cardAmount}>{fmt(totalBalance)}</Text>
+        <Text style={styles.cardSub}>{accounts.length} account{accounts.length !== 1 ? 's' : ''}</Text>
       </View>
 
       {/* Monthly Summary */}
-      {latestMonth ? (
-        <View style={styles.row}>
-          <View style={[styles.card, { marginRight: 8 }]}>
-            <Text style={styles.cardLabel}>Spending</Text>
-            <Text style={[styles.cardAmount, { color: Colors.Red, fontSize: 18 }]}>
-              -{new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(latestMonth.spending)}
-            </Text>
-            <Text style={styles.cardSub}>this month</Text>
-          </View>
-          <View style={styles.card}>
-            <Text style={styles.cardLabel}>Income</Text>
-            <Text style={[styles.cardAmount, { color: Colors.Green, fontSize: 18 }]}>
-              +{new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(latestMonth.income)}
-            </Text>
-            <Text style={styles.cardSub}>this month</Text>
-          </View>
+      <View style={styles.row}>
+        <View style={[styles.card, { marginRight: 8 }]}>
+          <Text style={styles.cardLabel}>Spending</Text>
+          <Text style={[styles.cardAmount, { color: Colors.Red, fontSize: 18 }]}>-{fmt(monthSpending)}</Text>
+          <Text style={styles.cardSub}>this month</Text>
         </View>
-      ) : null}
+        <View style={styles.card}>
+          <Text style={styles.cardLabel}>Income</Text>
+          <Text style={[styles.cardAmount, { color: Colors.Green, fontSize: 18 }]}>+{fmt(monthIncome)}</Text>
+          <Text style={styles.cardSub}>this month</Text>
+        </View>
+      </View>
 
       {/* Account Cards */}
       {accounts.length > 0 ? (
         <View style={styles.row}>
-          {accounts.map((a) => (
+          {accounts.map(a => (
             <View key={a.id} style={{ flex: 1, marginRight: 8 }}>
               <AccountCard
                 name={a.name}
@@ -132,13 +130,11 @@ export default function HomeScreen() {
           <Text style={styles.chartTitle}>Monthly Overview</Text>
           <BarChart
             data={{
-              labels: [...months].reverse().map(m => {
-                const [, mo] = m.month.split('-');
-                return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(mo)-1];
+              labels: months.map(([, m]) => {
+                const [, mo] = m.income ? months[0][0].split('-') : ['',''];
+                return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(mo)-1] || '';
               }),
-              datasets: [{
-                data: [...months].reverse().map(m => m.income - m.spending),
-              }],
+              datasets: [{ data: months.map(([, m]) => m.income - m.spending) }],
             }}
             width={screenWidth - 48}
             height={180}
@@ -162,22 +158,29 @@ export default function HomeScreen() {
       <View style={styles.row}>
         <View style={[styles.chartCard, { flex: 1, marginRight: 8 }]}>
           <Text style={styles.chartTitle}>Spending by Category</Text>
-          <SpendingChart data={spending} />
+          <SpendingChart data={spendingData} />
         </View>
         <View style={[styles.chartCard, { flex: 1 }]}>
           <Text style={styles.chartTitle}>Top Merchants</Text>
-          {merchants.length > 0 ? merchants.map((m, i) => (
+          {topMerchants.length > 0 ? topMerchants.map((m, i) => (
             <View key={i} style={styles.merchantRow}>
               <Text style={styles.merchantName} numberOfLines={1}>{m.merchant}</Text>
-              <Text style={styles.merchantAmount}>
-                -{new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(m.total)}
-              </Text>
+              <Text style={styles.merchantAmount}>-{fmt(m.total)}</Text>
             </View>
           )) : (
             <Text style={styles.emptyText}>No merchant data</Text>
           )}
         </View>
       </View>
+
+      {/* Empty state */}
+      {accounts.length === 0 && transactions.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <Ionicons name="card-outline" size={48} color={Colors.TextMuted} />
+          <Text style={styles.emptyTitle}>No data yet</Text>
+          <Text style={styles.emptyText}>Connect a bank in Profile to get started.</Text>
+        </View>
+      ) : null}
 
       <View style={{ height: 24 }} />
     </ScrollView>
@@ -192,11 +195,6 @@ const styles = StyleSheet.create({
   },
   greeting: { color: Colors.TextPrimary, fontSize: 22, fontWeight: '700' },
   subtitle: { color: Colors.TextMuted, fontSize: 13, marginTop: 2 },
-  errorBox: {
-    backgroundColor: Colors.Red + '22', marginHorizontal: 16, marginBottom: 12,
-    padding: 12, borderRadius: 8, borderWidth: 1, borderColor: Colors.Red + '44',
-  },
-  errorText: { color: Colors.Red, fontSize: 13 },
   cardWide: {
     backgroundColor: Colors.Card, borderRadius: 12, borderWidth: 1,
     borderColor: Colors.CardBorder, padding: 20, marginHorizontal: 16, marginBottom: 12,
@@ -205,9 +203,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.Card, borderRadius: 12, borderWidth: 1,
     borderColor: Colors.CardBorder, padding: 16, flex: 1, marginBottom: 12,
   },
-  row: {
-    flexDirection: 'row', paddingHorizontal: 16, marginBottom: 12,
-  },
+  row: { flexDirection: 'row', paddingHorizontal: 16, marginBottom: 12 },
   cardLabel: { color: Colors.TextSecondary, fontSize: 13, marginBottom: 6 },
   cardAmount: { color: Colors.TextPrimary, fontSize: 26, fontWeight: '700' },
   cardSub: { color: Colors.TextMuted, fontSize: 12, marginTop: 4 },
@@ -222,5 +218,7 @@ const styles = StyleSheet.create({
   },
   merchantName: { color: Colors.TextPrimary, fontSize: 13, flex: 1, marginRight: 8 },
   merchantAmount: { color: Colors.Red, fontSize: 13, fontWeight: '600' },
-  emptyText: { color: Colors.TextMuted, fontSize: 13, textAlign: 'center', padding: 16 },
+  emptyBox: { alignItems: 'center', padding: 40, gap: 8 },
+  emptyTitle: { color: Colors.TextPrimary, fontSize: 18, fontWeight: '600' },
+  emptyText: { color: Colors.TextMuted, fontSize: 13, textAlign: 'center' },
 });

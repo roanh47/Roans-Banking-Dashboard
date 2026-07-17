@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../src/Theme/Colors';
-import { sendChatMessage, fetchChatModels } from '../src/API/Client';
+import { sendChatMessage, fetchAiModels, getLocalAccounts, getLocalTransactions } from '../src/API/Client';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -23,11 +23,29 @@ export default function ChatScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   React.useEffect(() => {
-    fetchChatModels().then(d => {
-      setModels(d.models);
-      if (d.models.length && !selectedModel) setSelectedModel(d.models[0]);
+    fetchAiModels().then(m => {
+      setModels(m);
+      if (m.length && !selectedModel) setSelectedModel(m[0]);
     }).catch(() => {});
   }, []);
+
+  const buildContext = async () => {
+    const [accounts, txs] = await Promise.all([getLocalAccounts(), getLocalTransactions()]);
+    const parts: string[] = [];
+    if (accounts.length) {
+      parts.push('ACCOUNTS:');
+      accounts.forEach(a => parts.push(`  ${a.name}: ${a.currency} ${a.balance}`));
+    }
+    const recent = txs.slice(0, 20);
+    if (recent.length) {
+      parts.push('RECENT TRANSACTIONS:');
+      recent.forEach(t => {
+        const sign = t.amount > 0 ? '+' : '-';
+        parts.push(`  ${t.booking_date} | ${t.description || t.merchant_name || '?'} | ${sign}${Math.abs(t.amount)}`);
+      });
+    }
+    return parts.join('\n');
+  };
 
   const send = useCallback(async () => {
     const text = input.trim();
@@ -38,7 +56,8 @@ export default function ChatScreen() {
     setSending(true);
 
     try {
-      const { reply } = await sendChatMessage(text, selectedModel);
+      const context = await buildContext();
+      const reply = await sendChatMessage(text, selectedModel, context);
       setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (e: any) {
       setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${e.message}` }]);
@@ -54,7 +73,6 @@ export default function ChatScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={90}
     >
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>BankBot</Text>
         {models.length > 0 ? (
@@ -65,7 +83,6 @@ export default function ChatScreen() {
         ) : null}
       </View>
 
-      {/* Model Selector */}
       {showModels ? (
         <View style={styles.modelList}>
           <ScrollView style={{ maxHeight: 150 }}>
@@ -75,16 +92,13 @@ export default function ChatScreen() {
                 style={[styles.modelItem, m === selectedModel && styles.modelItemActive]}
                 onPress={() => { setSelectedModel(m); setShowModels(false); }}
               >
-                <Text style={[styles.modelItemText, m === selectedModel && styles.modelItemTextActive]}>
-                  {m}
-                </Text>
+                <Text style={[styles.modelItemText, m === selectedModel && styles.modelItemTextActive]}>{m}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
         </View>
       ) : null}
 
-      {/* Messages */}
       <ScrollView
         ref={scrollRef}
         style={styles.messages}
@@ -114,7 +128,6 @@ export default function ChatScreen() {
         ) : null}
       </ScrollView>
 
-      {/* Input */}
       <View style={styles.inputRow}>
         <TextInput
           style={styles.input}
@@ -161,10 +174,7 @@ const styles = StyleSheet.create({
   emptyTitle: { color: Colors.TextPrimary, fontSize: 18, fontWeight: '600' },
   emptyText: { color: Colors.TextMuted, fontSize: 13, textAlign: 'center', paddingHorizontal: 40 },
   bubble: { maxWidth: '80%', padding: 12, borderRadius: 12, marginBottom: 8 },
-  userBubble: {
-    backgroundColor: Colors.Accent, alignSelf: 'flex-end',
-    borderBottomRightRadius: 4,
-  },
+  userBubble: { backgroundColor: Colors.Accent, alignSelf: 'flex-end', borderBottomRightRadius: 4 },
   assistantBubble: {
     backgroundColor: Colors.Card, alignSelf: 'flex-start',
     borderBottomLeftRadius: 4, borderWidth: 1, borderColor: Colors.CardBorder,
@@ -172,8 +182,7 @@ const styles = StyleSheet.create({
   bubbleText: { color: Colors.TextPrimary, fontSize: 14, lineHeight: 20 },
   inputRow: {
     flexDirection: 'row', alignItems: 'flex-end', padding: 12, gap: 8,
-    borderTopWidth: 1, borderTopColor: Colors.CardBorder,
-    backgroundColor: Colors.Card,
+    borderTopWidth: 1, borderTopColor: Colors.CardBorder, backgroundColor: Colors.Card,
   },
   input: {
     flex: 1, backgroundColor: Colors.InputBg, borderRadius: 10,
