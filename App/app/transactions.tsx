@@ -4,6 +4,7 @@ import {
   View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity, RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../src/Theme/Colors';
 import TransactionRow from '../src/Components/TransactionRow';
 import { getLocalTransactions, Transaction } from '../src/API/Client';
@@ -37,7 +38,7 @@ export default function TransactionsScreen() {
   });
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.title}>Transactions</Text>
         <Text style={styles.subtitle}>{transactions.length} transactions</Text>
@@ -98,13 +99,13 @@ export default function TransactionsScreen() {
         )}
         <View style={{ height: 24 }} />
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.Background },
-  header: { paddingHorizontal: 16, paddingTop: 56, paddingBottom: 8 },
+  header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
   title: { color: Colors.TextPrimary, fontSize: 22, fontWeight: '700' },
   subtitle: { color: Colors.TextMuted, fontSize: 13, marginTop: 2 },
   filterRow: { paddingHorizontal: 16, marginBottom: 8 },

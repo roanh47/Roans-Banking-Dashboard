@@ -1,9 +1,13 @@
 // Root Layout — Bottom Tab Navigation
 import { Tabs } from 'expo-router';
+import { Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '../src/Theme/Colors';
 
 export default function RootLayout() {
+  const insets = useSafeAreaInsets();
+
   return (
     <Tabs
       screenOptions={{
@@ -13,28 +17,21 @@ export default function RootLayout() {
           backgroundColor: Colors.Card,
           borderTopColor: Colors.CardBorder,
           borderTopWidth: 1,
-          height: 60,
-          paddingBottom: 8,
+          height: 60 + (Platform.OS === 'android' ? insets.bottom : 0),
+          paddingBottom: 8 + (Platform.OS === 'android' ? insets.bottom : 0),
           paddingTop: 4,
         },
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '600',
         },
-        headerStyle: {
-          backgroundColor: Colors.Background,
-        },
-        headerTintColor: Colors.TextPrimary,
-        headerTitleStyle: {
-          fontWeight: '600',
-        },
+        headerShown: false,
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
-          headerShown: false,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
           ),
@@ -44,7 +41,6 @@ export default function RootLayout() {
         name="insights"
         options={{
           title: 'Insights',
-          headerShown: false,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="stats-chart" size={size} color={color} />
           ),
@@ -54,7 +50,6 @@ export default function RootLayout() {
         name="transactions"
         options={{
           title: 'Transactions',
-          headerShown: false,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="document-text" size={size} color={color} />
           ),
@@ -63,8 +58,7 @@ export default function RootLayout() {
       <Tabs.Screen
         name="chat"
         options={{
-          title: 'ChatBot',
-          headerShown: false,
+          title: 'BankBot',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="chatbubbles" size={size} color={color} />
           ),
@@ -74,7 +68,6 @@ export default function RootLayout() {
         name="profile"
         options={{
           title: 'Profile',
-          headerShown: false,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person" size={size} color={color} />
           ),

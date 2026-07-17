@@ -2,9 +2,10 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, StyleSheet, TextInput, TouchableOpacity,
-  Alert, ActivityIndicator,
+  Alert, ActivityIndicator, Modal, FlatList,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../src/Theme/Colors';
 import { getSettings, saveSettings, fetchAiModels, AppSettings } from '../src/API/Client';
 
@@ -14,7 +15,8 @@ export default function ProfileScreen() {
   });
   const [aiModels, setAiModels] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const [showModels, setShowModels] = useState(false);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
 
   const loadSettings = useCallback(async () => {
     const s = await getSettings();
@@ -35,130 +37,177 @@ export default function ProfileScreen() {
   };
 
   const handleFetchModels = async () => {
-    if (!settings.AiEndpoint) return;
+    if (!settings.AiEndpoint) {
+      Alert.alert('Error', 'Enter an AI endpoint first.');
+      return;
+    }
+    setLoadingModels(true);
     try {
       const models = await fetchAiModels();
       setAiModels(models);
-      setShowModels(true);
-    } catch {
-      Alert.alert('Error', 'Could not fetch models.');
+      if (models.length === 0) {
+        Alert.alert('No models', 'Endpoint returned no models. Check your endpoint and API key.');
+      } else {
+        setShowModelPicker(true);
+      }
+    } catch (e: any) {
+      Alert.alert('Error', `Could not fetch models: ${e.message}`);
+    } finally {
+      setLoadingModels(false);
     }
   };
 
+  const selectModel = (model: string) => {
+    update('AiModel', model);
+    setShowModelPicker(false);
+  };
+
   return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Profile & Settings</Text>
-      </View>
-
-      {/* ── Enable Banking ── */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Enable Banking</Text>
-        <View style={styles.card}>
-          <Text style={styles.label}>Application ID</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="your-app-id"
-            placeholderTextColor={Colors.TextMuted}
-            value={settings.EnableBankingAppId}
-            onChangeText={v => update('EnableBankingAppId', v)}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-
-          <Text style={[styles.label, { marginTop: 12 }]}>Private Key (.pem)</Text>
-          <TextInput
-            style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
-            placeholder="Paste your private key here"
-            placeholderTextColor={Colors.TextMuted}
-            value={settings.EnableBankingKey}
-            onChangeText={v => update('EnableBankingKey', v)}
-            multiline
-            autoCapitalize="none"
-          />
-          <Text style={styles.hint}>Used to sign JWT requests to Enable Banking.</Text>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView style={styles.scroll}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Profile & Settings</Text>
         </View>
-      </View>
 
-      {/* ── AI / BankBot ── */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>AI / BankBot</Text>
-        <View style={styles.card}>
-          <Text style={styles.label}>Endpoint</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="https://api.openai.com/v1"
-            placeholderTextColor={Colors.TextMuted}
-            value={settings.AiEndpoint}
-            onChangeText={v => update('AiEndpoint', v)}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-          />
+        {/* ── Enable Banking ── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Enable Banking</Text>
+          <View style={styles.card}>
+            <Text style={styles.label}>Application ID</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="your-app-id"
+              placeholderTextColor={Colors.TextMuted}
+              value={settings.EnableBankingAppId}
+              onChangeText={v => update('EnableBankingAppId', v)}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
 
-          <Text style={[styles.label, { marginTop: 12 }]}>API Key</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="sk-..."
-            placeholderTextColor={Colors.TextMuted}
-            value={settings.AiApiKey}
-            onChangeText={v => update('AiApiKey', v)}
-            autoCapitalize="none"
-            autoCorrect={false}
-            secureTextEntry
-          />
+            <Text style={[styles.label, { marginTop: 12 }]}>Private Key (.pem)</Text>
+            <TextInput
+              style={[styles.input, { height: 80, textAlignVertical: 'top' }]}
+              placeholder="-----BEGIN RSA PRIVATE KEY-----"
+              placeholderTextColor={Colors.TextMuted}
+              value={settings.EnableBankingKey}
+              onChangeText={v => update('EnableBankingKey', v)}
+              multiline
+              autoCapitalize="none"
+            />
+            <Text style={styles.hint}>Used to sign JWT requests to Enable Banking API.</Text>
+          </View>
+        </View>
 
-          <Text style={[styles.label, { marginTop: 12 }]}>Model</Text>
-          {aiModels.length > 0 && showModels ? (
-            <View style={styles.modelList}>
-              {aiModels.map(m => (
-                <TouchableOpacity
-                  key={m}
-                  style={[styles.modelItem, settings.AiModel === m && styles.modelItemActive]}
-                  onPress={() => { update('AiModel', m); setShowModels(false); }}
-                >
-                  <Text style={[styles.modelItemText, settings.AiModel === m && styles.modelItemTextActive]}>{m}</Text>
-                </TouchableOpacity>
-              ))}
+        {/* ── AI / BankBot ── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>AI / BankBot</Text>
+          <View style={styles.card}>
+            <Text style={styles.label}>Endpoint</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="https://api.openai.com/v1"
+              placeholderTextColor={Colors.TextMuted}
+              value={settings.AiEndpoint}
+              onChangeText={v => update('AiEndpoint', v)}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+
+            <Text style={[styles.label, { marginTop: 12 }]}>API Key</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="sk-..."
+              placeholderTextColor={Colors.TextMuted}
+              value={settings.AiApiKey}
+              onChangeText={v => update('AiApiKey', v)}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+
+            {/* Model selector */}
+            <Text style={[styles.label, { marginTop: 12 }]}>Model</Text>
+            <TouchableOpacity
+              style={styles.modelSelector}
+              onPress={() => aiModels.length > 0 ? setShowModelPicker(true) : handleFetchModels()}
+            >
+              <Text style={[styles.modelSelectorText, !settings.AiModel && { color: Colors.TextMuted }]}>
+                {settings.AiModel || 'Select a model...'}
+              </Text>
+              <Ionicons name="chevron-down" size={16} color={Colors.TextSecondary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.fetchBtn}
+              onPress={handleFetchModels}
+              disabled={loadingModels || !settings.AiEndpoint}
+            >
+              {loadingModels ? (
+                <ActivityIndicator size="small" color={Colors.Accent} />
+              ) : (
+                <Text style={styles.fetchBtnText}>Fetch Models</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── Save Button ── */}
+        <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving}>
+          {saving ? (
+            <ActivityIndicator size="small" color={Colors.Background} />
+          ) : (
+            <Text style={styles.saveBtnText}>Save Settings</Text>
+          )}
+        </TouchableOpacity>
+
+        {/* ── App Info ── */}
+        <View style={styles.appInfo}>
+          <Text style={styles.appInfoText}>Roan's Banking App v0.0.1</Text>
+        </View>
+
+        <View style={{ height: 40 }} />
+      </ScrollView>
+
+      {/* ── Model Picker Modal ── */}
+      <Modal visible={showModelPicker} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Model</Text>
+              <TouchableOpacity onPress={() => setShowModelPicker(false)}>
+                <Ionicons name="close" size={24} color={Colors.TextPrimary} />
+              </TouchableOpacity>
             </View>
-          ) : null}
-          <TextInput
-            style={styles.input}
-            placeholder="Model name (or fetch list)"
-            placeholderTextColor={Colors.TextMuted}
-            value={settings.AiModel}
-            onChangeText={v => update('AiModel', v)}
-            autoCapitalize="none"
-          />
-
-          <TouchableOpacity style={styles.testBtn} onPress={handleFetchModels} disabled={!settings.AiEndpoint}>
-            <Text style={styles.testBtnText}>Fetch Models</Text>
-          </TouchableOpacity>
+            <FlatList
+              data={aiModels}
+              keyExtractor={item => item}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={[styles.modelItem, item === settings.AiModel && styles.modelItemActive]}
+                  onPress={() => selectModel(item)}
+                >
+                  <Text style={[styles.modelItemText, item === settings.AiModel && styles.modelItemTextActive]}>
+                    {item}
+                  </Text>
+                  {item === settings.AiModel && (
+                    <Ionicons name="checkmark" size={18} color={Colors.Accent} />
+                  )}
+                </TouchableOpacity>
+              )}
+              style={{ maxHeight: 400 }}
+            />
+          </View>
         </View>
-      </View>
-
-      {/* ── Save Button ── */}
-      <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving}>
-        {saving ? (
-          <ActivityIndicator size="small" color={Colors.Background} />
-        ) : (
-          <Text style={styles.saveBtnText}>Save Settings</Text>
-        )}
-      </TouchableOpacity>
-
-      {/* ── App Info ── */}
-      <View style={styles.appInfo}>
-        <Text style={styles.appInfoText}>Roan's Banking App v0.0.1</Text>
-      </View>
-
-      <View style={{ height: 40 }} />
-    </ScrollView>
+      </Modal>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.Background },
-  header: { paddingHorizontal: 16, paddingTop: 56, paddingBottom: 12 },
+  scroll: { flex: 1 },
+  header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12 },
   title: { color: Colors.TextPrimary, fontSize: 22, fontWeight: '700' },
   section: { marginBottom: 16 },
   sectionTitle: {
@@ -177,19 +226,17 @@ const styles = StyleSheet.create({
     color: Colors.TextPrimary, fontSize: 14,
   },
   hint: { color: Colors.TextMuted, fontSize: 12, marginTop: 8 },
-  testBtn: {
+  modelSelector: {
+    backgroundColor: Colors.InputBg, borderRadius: 8, borderWidth: 1,
+    borderColor: Colors.InputBorder, paddingHorizontal: 12, paddingVertical: 12,
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+  },
+  modelSelectorText: { color: Colors.TextPrimary, fontSize: 14 },
+  fetchBtn: {
     backgroundColor: Colors.Accent + '22', borderRadius: 8, paddingVertical: 10,
     alignItems: 'center', marginTop: 12, borderWidth: 1, borderColor: Colors.Accent + '44',
   },
-  testBtnText: { color: Colors.Accent, fontSize: 14, fontWeight: '600' },
-  modelList: {
-    backgroundColor: Colors.InputBg, borderRadius: 8, borderWidth: 1,
-    borderColor: Colors.InputBorder, marginBottom: 8, maxHeight: 150,
-  },
-  modelItem: { paddingHorizontal: 12, paddingVertical: 10 },
-  modelItemActive: { backgroundColor: Colors.Accent + '22' },
-  modelItemText: { color: Colors.TextSecondary, fontSize: 13 },
-  modelItemTextActive: { color: Colors.Accent, fontWeight: '600' },
+  fetchBtnText: { color: Colors.Accent, fontSize: 14, fontWeight: '600' },
   saveBtn: {
     backgroundColor: Colors.Accent, borderRadius: 12, paddingVertical: 14,
     alignItems: 'center', marginHorizontal: 16, marginTop: 8,
@@ -197,4 +244,25 @@ const styles = StyleSheet.create({
   saveBtnText: { color: Colors.Background, fontSize: 16, fontWeight: '700' },
   appInfo: { alignItems: 'center', marginTop: 24 },
   appInfoText: { color: Colors.TextMuted, fontSize: 12 },
+  modalOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: Colors.Card, borderTopLeftRadius: 16, borderTopRightRadius: 16,
+    paddingTop: 16, paddingBottom: 32,
+  },
+  modalHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 16, marginBottom: 12,
+  },
+  modalTitle: { color: Colors.TextPrimary, fontSize: 18, fontWeight: '600' },
+  modelItem: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingHorizontal: 16, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: Colors.CardBorder,
+  },
+  modelItemActive: { backgroundColor: Colors.Accent + '15' },
+  modelItemText: { color: Colors.TextSecondary, fontSize: 14, flex: 1 },
+  modelItemTextActive: { color: Colors.Accent, fontWeight: '600' },
 });

@@ -5,6 +5,7 @@ import {
   KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../src/Theme/Colors';
 import { sendChatMessage, fetchAiModels, getLocalAccounts, getLocalTransactions } from '../src/API/Client';
 
@@ -68,83 +69,85 @@ export default function ChatScreen() {
   }, [input, sending, selectedModel]);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
-    >
-      <View style={styles.header}>
-        <Text style={styles.title}>BankBot</Text>
-        {models.length > 0 ? (
-          <TouchableOpacity style={styles.modelBtn} onPress={() => setShowModels(!showModels)}>
-            <Text style={styles.modelText} numberOfLines={1}>{selectedModel || 'Select model'}</Text>
-            <Ionicons name="chevron-down" size={14} color={Colors.Accent} />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
-      {showModels ? (
-        <View style={styles.modelList}>
-          <ScrollView style={{ maxHeight: 150 }}>
-            {models.map(m => (
-              <TouchableOpacity
-                key={m}
-                style={[styles.modelItem, m === selectedModel && styles.modelItemActive]}
-                onPress={() => { setSelectedModel(m); setShowModels(false); }}
-              >
-                <Text style={[styles.modelItemText, m === selectedModel && styles.modelItemTextActive]}>{m}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      ) : null}
-
-      <ScrollView
-        ref={scrollRef}
-        style={styles.messages}
-        contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
-        onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
       >
-        {messages.length === 0 ? (
-          <View style={styles.empty}>
-            <Ionicons name="chatbubbles-outline" size={48} color={Colors.TextMuted} />
-            <Text style={styles.emptyTitle}>Ask BankBot</Text>
-            <Text style={styles.emptyText}>
-              Questions about your finances, spending, accounts, and transactions.
-            </Text>
+        <View style={styles.header}>
+          <Text style={styles.title}>BankBot</Text>
+          {models.length > 0 ? (
+            <TouchableOpacity style={styles.modelBtn} onPress={() => setShowModels(!showModels)}>
+              <Text style={styles.modelText} numberOfLines={1}>{selectedModel || 'Select model'}</Text>
+              <Ionicons name="chevron-down" size={14} color={Colors.Accent} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        {showModels ? (
+          <View style={styles.modelList}>
+            <ScrollView style={{ maxHeight: 150 }}>
+              {models.map(m => (
+                <TouchableOpacity
+                  key={m}
+                  style={[styles.modelItem, m === selectedModel && styles.modelItemActive]}
+                  onPress={() => { setSelectedModel(m); setShowModels(false); }}
+                >
+                  <Text style={[styles.modelItemText, m === selectedModel && styles.modelItemTextActive]}>{m}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           </View>
         ) : null}
 
-        {messages.map((m, i) => (
-          <View key={i} style={[styles.bubble, m.role === 'user' ? styles.userBubble : styles.assistantBubble]}>
-            <Text style={styles.bubbleText}>{m.content}</Text>
-          </View>
-        ))}
+        <ScrollView
+          ref={scrollRef}
+          style={styles.messages}
+          contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
+          onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+        >
+          {messages.length === 0 ? (
+            <View style={styles.empty}>
+              <Ionicons name="chatbubbles-outline" size={48} color={Colors.TextMuted} />
+              <Text style={styles.emptyTitle}>Ask BankBot</Text>
+              <Text style={styles.emptyText}>
+                Questions about your finances, spending, accounts, and transactions.
+              </Text>
+            </View>
+          ) : null}
 
-        {sending ? (
-          <View style={[styles.bubble, styles.assistantBubble]}>
-            <ActivityIndicator size="small" color={Colors.Accent} />
-          </View>
-        ) : null}
-      </ScrollView>
+          {messages.map((m, i) => (
+            <View key={i} style={[styles.bubble, m.role === 'user' ? styles.userBubble : styles.assistantBubble]}>
+              <Text style={styles.bubbleText}>{m.content}</Text>
+            </View>
+          ))}
 
-      <View style={styles.inputRow}>
-        <TextInput
-          style={styles.input}
-          placeholder="Ask about your finances..."
-          placeholderTextColor={Colors.TextMuted}
-          value={input}
-          onChangeText={setInput}
-          onSubmitEditing={send}
-          returnKeyType="send"
-          multiline
-          maxLength={2000}
-        />
-        <TouchableOpacity style={styles.sendBtn} onPress={send} disabled={sending || !input.trim()}>
-          <Ionicons name="send" size={20} color={input.trim() && !sending ? Colors.Background : Colors.TextMuted} />
-        </TouchableOpacity>
-      </View>
-    </KeyboardAvoidingView>
+          {sending ? (
+            <View style={[styles.bubble, styles.assistantBubble]}>
+              <ActivityIndicator size="small" color={Colors.Accent} />
+            </View>
+          ) : null}
+        </ScrollView>
+
+        <View style={styles.inputRow}>
+          <TextInput
+            style={styles.input}
+            placeholder="Ask about your finances..."
+            placeholderTextColor={Colors.TextMuted}
+            value={input}
+            onChangeText={setInput}
+            onSubmitEditing={send}
+            returnKeyType="send"
+            multiline
+            maxLength={2000}
+          />
+          <TouchableOpacity style={styles.sendBtn} onPress={send} disabled={sending || !input.trim()}>
+            <Ionicons name="send" size={20} color={input.trim() && !sending ? Colors.Background : Colors.TextMuted} />
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
@@ -152,7 +155,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.Background },
   header: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 16, paddingTop: 56, paddingBottom: 8,
+    paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8,
   },
   title: { color: Colors.TextPrimary, fontSize: 22, fontWeight: '700' },
   modelBtn: {
