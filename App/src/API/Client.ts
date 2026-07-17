@@ -3,11 +3,11 @@
 
 import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
-import * as Crypto from 'expo-crypto';
 
 const STORE_KEY = 'banking_app_settings';
 const ACCOUNTS_KEY = 'banking_accounts';
 const TRANSACTIONS_KEY = 'banking_transactions';
+const CONNECTIONS_KEY = 'banking_connections';
 
 export interface AppSettings {
   EnableBankingAppId: string;
@@ -15,6 +15,14 @@ export interface AppSettings {
   AiEndpoint: string;
   AiApiKey: string;
   AiModel: string;
+}
+
+export interface BankConnection {
+  id: string;
+  bankName: string;
+  bankCountry: string;
+  sessionId: string;
+  connectedAt: string;
 }
 
 // ── Settings Storage ────────────────────────────────────────
@@ -31,13 +39,35 @@ export async function saveSettings(s: AppSettings): Promise<void> {
   await SecureStore.setItemAsync(STORE_KEY, JSON.stringify(s));
 }
 
+// ── Bank Connections Storage ────────────────────────────────
+
+export async function getConnections(): Promise<BankConnection[]> {
+  try {
+    const raw = await SecureStore.getItemAsync(CONNECTIONS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+export async function saveConnections(conns: BankConnection[]) {
+  await SecureStore.setItemAsync(CONNECTIONS_KEY, JSON.stringify(conns));
+}
+
+export async function addConnection(conn: BankConnection) {
+  const conns = await getConnections();
+  conns.push(conn);
+  await saveConnections(conns);
+}
+
+export async function removeConnection(id: string) {
+  const conns = await getConnections();
+  await saveConnections(conns.filter(c => c.id !== id));
+}
+
 // ── Enable Banking (direct API) ─────────────────────────────
 
 const EB_BASE = 'https://api.enablebanking.com';
-const REDIRECT_URI = 'http://localhost:8080/api/auth/callback';
+const REDIRECT_URI = 'https://roanh47.github.io/Roans-Banking-Dashboard/callback.html';
 
-// Simple JWT signing using the private key (RS256)
-// We construct the JWT manually since we need RSA signing
 function base64url(str: string): string {
   return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
@@ -53,9 +83,8 @@ async function makeJwt(appId: string, privateKey: string): Promise<string> {
   }));
   const unsigned = `${header}.${payload}`;
 
-  // RSA signing requires native crypto — we'll use a workaround for now.
-  // For production, use react-native-rsa-native or similar.
-  // For v0.0.1, we'll do the auth flow in-app and exchange the code directly.
+  // RSA signing requires native crypto
+  // For production, use react-native-rsa-native
   return `${unsigned}.signature_placeholder`;
 }
 
@@ -81,7 +110,7 @@ async function ebFetch(path: string, options: RequestInit = {}): Promise<any> {
   return res.json();
 }
 
-export async function fetchBanks() {
+export async function fetchBanks(): Promise<any[]> {
   const data = await ebFetch('/aspsps');
   return data.aspsps || data;
 }

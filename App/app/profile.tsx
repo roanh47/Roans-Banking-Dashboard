@@ -7,7 +7,12 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../src/Theme/Colors';
-import { getSettings, saveSettings, fetchAiModels, AppSettings } from '../src/API/Client';
+import {
+  getSettings, saveSettings, fetchAiModels, fetchBanks,
+  startBankAuth, openBankAuth, exchangeCode,
+  getConnections, addConnection, removeConnection,
+  AppSettings, BankConnection,
+} from '../src/API/Client';
 
 export default function ProfileScreen() {
   const [settings, setSettings] = useState<AppSettings>({
@@ -18,9 +23,19 @@ export default function ProfileScreen() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [showModelPicker, setShowModelPicker] = useState(false);
 
+  // Banks state
+  const [connections, setConnections] = useState<BankConnection[]>([]);
+  const [banks, setBanks] = useState<any[]>([]);
+  const [bankSearch, setBankSearch] = useState('');
+  const [showBankPicker, setShowBankPicker] = useState(false);
+  const [loadingBanks, setLoadingBanks] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+
   const loadSettings = useCallback(async () => {
     const s = await getSettings();
     setSettings(s);
+    const conns = await getConnections();
+    setConnections(conns);
   }, []);
 
   React.useEffect(() => { loadSettings(); }, [loadSettings]);
@@ -35,6 +50,8 @@ export default function ProfileScreen() {
     setSaving(false);
     Alert.alert('Saved', 'Settings saved.');
   };
+
+  // ── AI Models ──
 
   const handleFetchModels = async () => {
     if (!settings.AiEndpoint) {
@@ -61,6 +78,67 @@ export default function ProfileScreen() {
     update('AiModel', model);
     setShowModelPicker(false);
   };
+
+  // ── Banks ──
+
+  const handleLoadBanks = async () => {
+    setLoadingBanks(true);
+    try {
+      const list = await fetchBanks();
+      setBanks(list);
+      setShowBankPicker(true);
+    } catch (e: any) {
+      Alert.alert('Error', `Could not load banks: ${e.message}`);
+    } finally {
+      setLoadingBanks(false);
+    }
+  };
+
+  const handleConnectBank = async (bank: any) => {
+    setShowBankPicker(false);
+    setConnecting(true);
+    try {
+      const authData = await startBankAuth(bank.name, bank.country);
+      const authUrl = authData.url || authData.redirect_url;
+      if (!authUrl) throw new Error('No auth URL returned');
+
+      const { code } = await openBankAuth(authUrl);
+      const sessionData = await exchangeCode(code);
+
+      const conn: BankConnection = {
+        id: sessionData.session_id || Date.now().toString(),
+        bankName: bank.name,
+        bankCountry: bank.country || '',
+        sessionId: sessionData.session_id || '',
+        connectedAt: new Date().toISOString(),
+      };
+
+      await addConnection(conn);
+      setConnections(prev => [...prev, conn]);
+      Alert.alert('Connected', `${bank.name} connected successfully.`);
+    } catch (e: any) {
+      Alert.alert('Error', `Connection failed: ${e.message}`);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleRemoveConnection = (conn: BankConnection) => {
+    Alert.alert('Remove', `Disconnect ${conn.bankName}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove', style: 'destructive',
+        onPress: async () => {
+          await removeConnection(conn.id);
+          setConnections(prev => prev.filter(c => c.id !== conn.id));
+        },
+      },
+    ]);
+  };
+
+  const filteredBanks = banks.filter(b =>
+    !bankSearch || (b.name || '').toLowerCase().includes(bankSearch.toLowerCase())
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -95,6 +173,69 @@ export default function ProfileScreen() {
               autoCapitalize="none"
             />
             <Text style={styles.hint}>Used to sign JWT requests to Enable Banking API.</Text>
+
+            {/* Redirect URL Info */}
+            <TouchableOpacity
+              style={styles.infoRow}
+              onPress={() => Alert.alert(
+                'Redirect URL',
+                'In your Enable Banking application settings, set the redirect URL to:\n\nhttps://roanh47.github.io/Roans-Banking-Dashboard/callback.html\n\nThis is needed for the OAuth flow to work.',
+              )}
+            >
+              <Ionicons name="information-circle" size={18} color={Colors.Accent} />
+              <Text style={styles.infoText}>Where do I set the redirect URL?</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* ── Banks ── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Banks</Text>
+          <View style={styles.card}>
+            {/* Connected Banks */}
+            {connections.length > 0 ? (
+              <>
+                <Text style={styles.label}>Connected Banks</Text>
+                {connections.map(conn => (
+                  <View key={conn.id} style={styles.connectionRow}>
+                    <View style={styles.connectionInfo}>
+                      <Ionicons name="card" size={18} color={Colors.Accent} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.connectionName}>{conn.bankName}</Text>
+                        <Text style={styles.connectionSub}>
+                          Connected {new Date(conn.connectedAt).toLocaleDateString('nl-NL')}
+                        </Text>
+                      </View>
+                    </View>
+                    <TouchableOpacity onPress={() => handleRemoveConnection(conn)}>
+                      <Ionicons name="trash-outline" size={18} color={Colors.Red} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+                <View style={{ height: 12 }} />
+              </>
+            ) : null}
+
+            {/* Connect Bank Button */}
+            <TouchableOpacity
+              style={styles.connectBtn}
+              onPress={handleLoadBanks}
+              disabled={loadingBanks || connecting || !settings.EnableBankingAppId}
+            >
+              {loadingBanks ? (
+                <ActivityIndicator size="small" color={Colors.Accent} />
+              ) : connecting ? (
+                <ActivityIndicator size="small" color={Colors.Accent} />
+              ) : (
+                <>
+                  <Ionicons name="add-circle-outline" size={18} color={Colors.Accent} />
+                  <Text style={styles.connectBtnText}>Connect Bank</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            {!settings.EnableBankingAppId ? (
+              <Text style={styles.hint}>Set your Enable Banking App ID first.</Text>
+            ) : null}
           </View>
         </View>
 
@@ -126,7 +267,6 @@ export default function ProfileScreen() {
               secureTextEntry
             />
 
-            {/* Model selector */}
             <Text style={[styles.label, { marginTop: 12 }]}>Model</Text>
             <TouchableOpacity
               style={styles.modelSelector}
@@ -200,6 +340,51 @@ export default function ProfileScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* ── Bank Picker Modal ── */}
+      <Modal visible={showBankPicker} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Bank</Text>
+              <TouchableOpacity onPress={() => setShowBankPicker(false)}>
+                <Ionicons name="close" size={24} color={Colors.TextPrimary} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.bankSearchBox}>
+              <Ionicons name="search" size={16} color={Colors.TextMuted} />
+              <TextInput
+                style={styles.bankSearchInput}
+                placeholder="Search banks..."
+                placeholderTextColor={Colors.TextMuted}
+                value={bankSearch}
+                onChangeText={setBankSearch}
+              />
+            </View>
+            <FlatList
+              data={filteredBanks.slice(0, 50)}
+              keyExtractor={(item, i) => item.name + i}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.bankItem}
+                  onPress={() => handleConnectBank(item)}
+                >
+                  <Ionicons name="card-outline" size={18} color={Colors.TextSecondary} />
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.bankItemName}>{item.name}</Text>
+                    <Text style={styles.bankItemCountry}>{item.country || ''}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={Colors.TextMuted} />
+                </TouchableOpacity>
+              )}
+              style={{ maxHeight: 400 }}
+              ListEmptyComponent={
+                <Text style={styles.emptyText}>No banks found</Text>
+              }
+            />
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -226,6 +411,11 @@ const styles = StyleSheet.create({
     color: Colors.TextPrimary, fontSize: 14,
   },
   hint: { color: Colors.TextMuted, fontSize: 12, marginTop: 8 },
+  infoRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    marginTop: 12, paddingVertical: 4,
+  },
+  infoText: { color: Colors.Accent, fontSize: 13, textDecorationLine: 'underline' },
   modelSelector: {
     backgroundColor: Colors.InputBg, borderRadius: 8, borderWidth: 1,
     borderColor: Colors.InputBorder, paddingHorizontal: 12, paddingVertical: 12,
@@ -237,6 +427,19 @@ const styles = StyleSheet.create({
     alignItems: 'center', marginTop: 12, borderWidth: 1, borderColor: Colors.Accent + '44',
   },
   fetchBtnText: { color: Colors.Accent, fontSize: 14, fontWeight: '600' },
+  connectionRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.CardBorder,
+  },
+  connectionInfo: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  connectionName: { color: Colors.TextPrimary, fontSize: 14, fontWeight: '500' },
+  connectionSub: { color: Colors.TextMuted, fontSize: 12, marginTop: 2 },
+  connectBtn: {
+    backgroundColor: Colors.Accent + '22', borderRadius: 8, paddingVertical: 12,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    borderWidth: 1, borderColor: Colors.Accent + '44',
+  },
+  connectBtnText: { color: Colors.Accent, fontSize: 14, fontWeight: '600' },
   saveBtn: {
     backgroundColor: Colors.Accent, borderRadius: 12, paddingVertical: 14,
     alignItems: 'center', marginHorizontal: 16, marginTop: 8,
@@ -265,4 +468,17 @@ const styles = StyleSheet.create({
   modelItemActive: { backgroundColor: Colors.Accent + '15' },
   modelItemText: { color: Colors.TextSecondary, fontSize: 14, flex: 1 },
   modelItemTextActive: { color: Colors.Accent, fontWeight: '600' },
+  bankSearchBox: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: Colors.InputBg,
+    borderRadius: 8, borderWidth: 1, borderColor: Colors.InputBorder,
+    marginHorizontal: 16, marginBottom: 12, paddingHorizontal: 12, paddingVertical: 8,
+  },
+  bankSearchInput: { flex: 1, color: Colors.TextPrimary, fontSize: 14, marginLeft: 8, padding: 0 },
+  bankItem: {
+    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14,
+    borderBottomWidth: 1, borderBottomColor: Colors.CardBorder,
+  },
+  bankItemName: { color: Colors.TextPrimary, fontSize: 14, fontWeight: '500' },
+  bankItemCountry: { color: Colors.TextMuted, fontSize: 12, marginTop: 2 },
+  emptyText: { color: Colors.TextMuted, fontSize: 13, textAlign: 'center', padding: 24 },
 });
