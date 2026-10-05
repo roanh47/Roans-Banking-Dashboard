@@ -90,10 +90,10 @@ def sync_all():
                 tx_list = []
                 for date_from in candidates:
                     try:
-                        tx_data = client.get_transactions(account["id"], date_from=date_from)
+                        fetched = client.get_all_transactions(account["id"], date_from=date_from)
                     except requests.HTTPError:
                         continue  # bank weigert deze datum (bv. ASPSP_ERROR) -> volgende kandidaat
-                    tx_list = tx_data.get("transactions", []) if isinstance(tx_data, dict) else (tx_data or [])
+                    tx_list = fetched or []
                     if tx_list:
                         break
 

@@ -140,3 +140,42 @@ class EnableBankingClient:
         )
         resp.raise_for_status()
         return resp.json()
+
+    def get_all_transactions(
+        self, account_id: str, date_from: str = None, date_to: str = None,
+        max_pages: int = 200,
+    ) -> list:
+        """Fetch ALL transactions for an account.
+
+        De API levert maximaal 500 transacties per pagina en geeft een
+        continuation_key voor de volgende pagina. Zonder paging zou een sync
+        stilzwijgend alleen de nieuwste 500 transacties opslaan.
+        """
+        transactions = []
+        continuation_key = None
+
+        for _ in range(max_pages):
+            params = {}
+            if date_from:
+                params["date_from"] = date_from
+            if date_to:
+                params["date_to"] = date_to
+            if continuation_key:
+                params["continuation_key"] = continuation_key
+
+            resp = requests.get(
+                f"{self.BASE_URL}/accounts/{account_id}/transactions",
+                headers=self._headers(),
+                params=params,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            page = data.get("transactions", []) if isinstance(data, dict) else (data or [])
+            transactions.extend(page)
+
+            continuation_key = data.get("continuation_key") if isinstance(data, dict) else None
+            if not continuation_key or not page:
+                break
+
+        return transactions
