@@ -4,6 +4,8 @@ from app.enable_banking import EnableBankingClient
 from datetime import datetime, timedelta
 from app.categorize import categorize
 
+import requests
+
 router = APIRouter(prefix="/api", tags=["sync"])
 
 # Volledige historiek ophalen: vraag op vanaf HISTORY_START en schuif op naar de
@@ -89,8 +91,8 @@ def sync_all():
                 for date_from in candidates:
                     try:
                         tx_data = client.get_transactions(account["id"], date_from=date_from)
-                    except Exception:
-                        continue
+                    except requests.HTTPError:
+                        continue  # bank weigert deze datum (bv. ASPSP_ERROR) -> volgende kandidaat
                     tx_list = tx_data.get("transactions", []) if isinstance(tx_data, dict) else (tx_data or [])
                     if tx_list:
                         break
