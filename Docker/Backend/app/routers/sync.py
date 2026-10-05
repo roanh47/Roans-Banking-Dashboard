@@ -6,6 +6,13 @@ from app.categorize import categorize
 
 router = APIRouter(prefix="/api", tags=["sync"])
 
+# Volledige historiek ophalen: vraag op vanaf HISTORY_START en schuif op naar de
+# eerste datum die de bank accepteert (sommige banken weigeren een te vroege
+# date_from met een ASPSP-fout). Zo begint de opgetelde reeks zo vroeg mogelijk
+# en weet je dat je niet midden in de historiek begint.
+HISTORY_START = "2000-01-01"
+HISTORY_FALLBACKS = ("2010-01-01", "2015-01-01", "2019-01-01")
+
 
 @router.get("/sync")
 def sync_all():
@@ -71,10 +78,22 @@ def sync_all():
                             except (ValueError, TypeError):
                                 continue
 
-                # Fetch transactions
-                date_from = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d")
-                tx_data = client.get_transactions(account["id"], date_from=date_from)
-                tx_list = tx_data.get("transactions", []) if isinstance(tx_data, dict) else tx_data
+                # Fetch transactions: vanaf het vroegst mogelijke moment, zodat de
+                # opgetelde historiek bij nul begint. Banken kunnen een te vroege
+                # date_from weigeren (ASPSP_ERROR); dan schuift de sync op naar de
+                # eerstvolgende datum die de bank wél accepteert.
+                candidates = (HISTORY_START,) + HISTORY_FALLBACKS + (
+                    (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d"),
+                )
+                tx_list = []
+                for date_from in candidates:
+                    try:
+                        tx_data = client.get_transactions(account["id"], date_from=date_from)
+                    except Exception:
+                        continue
+                    tx_list = tx_data.get("transactions", []) if isinstance(tx_data, dict) else (tx_data or [])
+                    if tx_list:
+                        break
 
                 for tx in tx_list:
                     tx_id = tx.get("entry_reference") or tx.get("transactionId") or tx.get("id", "")
