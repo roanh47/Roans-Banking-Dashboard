@@ -48,17 +48,36 @@ const Pages = {
     page.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading your finances...</p></div>`;
 
     try {
-      const [summary, accounts] = await Promise.all([
+      const [summary, accounts, banks, ext] = await Promise.all([
         API.get("/api/accounts/summary"),
         API.get("/api/accounts"),
+        API.get("/api/accounts/banks").catch(() => ({ banks: [] })),
+        API.get("/api/external/accounts").catch(() => ({ accounts: [], candidates: [] })),
       ]);
 
-      const total = summary.total_balance || 0;
-      const count = summary.account_count || 0;
-      const formattedTotal = new Intl.NumberFormat("en-EU", {
-        style: "currency",
-        currency: "EUR",
-      }).format(total);
+      const external = ext.accounts || [];
+      const euro = (v) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(v || 0);
+      const datum = (s) => (s ? new Date(String(s).replace(" ", "T")).toLocaleDateString("en-GB") : "--");
+
+      const total = summary.net_worth !== undefined && summary.net_worth !== null
+        ? summary.net_worth
+        : (summary.total_balance || 0);
+      const count = (summary.account_count || 0) + (summary.external_account_count || 0);
+      const formattedTotal = euro(total);
+
+      let sessionWarning = "";
+      (banks.banks || []).filter((b) => b.state && b.state !== "ok").forEach((b) => {
+        const isExpired = b.state === "verlopen";
+        const isDisconnected = b.state === "losgekoppeld";
+        sessionWarning += `
+          <div class="alert ${isExpired ? "alert-red" : "alert-orange"}">
+            <div class="alert-body">
+              <div class="alert-title">${isDisconnected ? "Bank disconnected" : isExpired ? "Bank session expired" : `Bank session expires soon (${b.days_left} days left)`} · ${b.bank_name}</div>
+              <div class="alert-text">${isDisconnected ? "No new transactions will come in. The history is kept." : isExpired ? "New transactions are no longer coming in. The amounts below are the last retrieved state." : "Reconnect to keep syncing."}</div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="reconnectBank(${b.id}, '${b.bank_name}', '${b.bank_country || ""}')">Reconnect</button>
+          </div>`;
+      });
 
       let accountsHtml = "";
       (accounts.accounts || []).forEach((a) => {
@@ -74,23 +93,33 @@ const Pages = {
           </div>`;
       });
 
+      (external || []).forEach((a) => {
+        accountsHtml += `
+          <div class="balance-card">
+            <div class="balance-label">${a.name} <span class="badge badge-warn">predicted</span></div>
+            <div class="balance-amount">${euro(a.balance)}</div>
+            <div class="balance-sub">baseline ${euro(a.baseline)} on ${a.baseline_date || "--"}${a.delta ? ` · ${a.delta >= 0 ? "+" : ""}${euro(a.delta)} in transfers` : ""}</div>
+          </div>`;
+      });
+
       if (!accountsHtml) {
         accountsHtml = `
           <div class="balance-card" style="grid-column:1/-1;text-align:center;padding:40px;">
             <div class="empty-state">
               <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M12 9v4M10 13h4"/></svg>
               <p>No accounts connected yet.</p>
-              <p style="margin-top:4px;font-size:13px;">Go to Connect Bank to get started.</p>
+              <p style="margin-top:4px;font-size:13px;">Connect one on the Banks page to get started.</p>
             </div>
           </div>`;
       }
 
       page.innerHTML = `
+        ${sessionWarning}
         <div class="balance-grid">
           <div class="balance-card">
             <div class="balance-label">Net Worth</div>
             <div class="balance-amount">${formattedTotal}</div>
-            <div class="balance-sub">${count} account${count !== 1 ? "s" : ""}</div>
+            <div class="balance-sub">${count} accounts${summary.external_balance ? ` · ${euro(summary.external_balance)} predicted` : ""}</div>
           </div>
           <div class="balance-card">
             <div class="balance-label">Spending this month</div>
@@ -271,209 +300,572 @@ const Pages = {
     }
   },
 
+  // ── Insights ────────────────────────────────────────────────────────────
+  // Alles hier wordt uit je eigen boekingen gerekend: één keer ophalen, daarna
+  // alleen hergroeperen als je een andere periode kiest. Geen schattingen.
   async insights() {
     const page = document.getElementById("page-content");
-    page.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading insights...</p></div>`;
+    if (!window.__insightsTx || Date.now() - (window.__insightsTx.tijd || 0) > 60000) {
+      page.innerHTML = `<div class="loading"><div class="spinner"></div><p>Crunching your transactions...</p></div>`;
+      try {
+        const [data, overzicht] = await Promise.all([
+          API.get("/api/transactions?limit=50000"),
+          API.get("/api/accounts/overview"),
+        ]);
+        window.__insightsTx = {
+          tx: data.transactions || [],
+          accounts: overzicht.accounts || [],
+          links: data.links || {},
+          tijd: Date.now(),
+        };
+      } catch (e) {
+        page.innerHTML = `<div class="error-banner">Could not load insights: ${escapeHtml(e.message)}</div>`;
+        return;
+      }
+    }
+    this._tekenInsights(this._insightPeriode || "12m");
+  },
 
-    try {
-      const [spending, monthly] = await Promise.all([
-        API.get("/api/insights/spending?days=90"),
-        API.get("/api/insights/monthly"),
-      ]);
+  _tekenInsights(periodeId) {
+    this._insightPeriode = periodeId;
+    const page = document.getElementById("page-content");
+    const staat = window.__insightsTx || { tx: [], accounts: [], links: {} };
+    const alles = staat.tx;
 
-      page.innerHTML = `
-        <div class="charts-grid">
-          <div class="chart-card">
-            <div class="card-header">
-              <span class="card-title">Spending Breakdown (90 days)</span>
-            </div>
-            <canvas id="insightCategoryChart"></canvas>
+    const euro = (v) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(Math.abs(v || 0));
+    const kort = (v) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v || 0);
+    const bedrag = (t) => Number(t.amount) || 0;
+    const dag = (t) => String(t.booking_date || "").slice(0, 10);
+    const maand = (t) => dag(t).slice(0, 7);
+    const naam = (t) => String(t.merchant_name || t.description || "Unknown").trim();
+    const isoLokaal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const pct = (v, decimalen = 1) => v.toLocaleString("nl-NL", { minimumFractionDigits: decimalen, maximumFractionDigits: decimalen }) + "%";
+    const maandLabel = (m) => {
+      const [j, mm] = m.split("-");
+      return new Date(Number(j), Number(mm) - 1, 1).toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+    };
+
+    const PERIODES = [
+      { id: "30d", label: "30 days", dagen: 30 },
+      { id: "90d", label: "90 days", dagen: 90 },
+      { id: "12m", label: "12 months", dagen: 365 },
+      { id: "all", label: "All time", dagen: null },
+    ];
+    const periode = PERIODES.find((p) => p.id === periodeId) || PERIODES[2];
+
+    // De laatste boeking in de data is "vandaag": de bank is de baas, niet de klok.
+    const datums = alles.map(dag).filter(Boolean).sort();
+    const laatste = datums.length ? datums[datums.length - 1] : new Date().toISOString().slice(0, 10);
+    const eind = new Date(laatste + "T00:00:00");
+    const begin = periode.dagen ? new Date(eind.getTime() - periode.dagen * 86400000) : null;
+    const vorigeEind = begin ? new Date(begin.getTime() - 86400000) : null;
+    const vorigeBegin = periode.dagen ? new Date(begin.getTime() - periode.dagen * 86400000) : null;
+    const op = (t) => new Date(dag(t) + "T00:00:00");
+    const inPeriode = (t) => !begin || op(t) >= begin;
+    const inVorige = (t) => !!vorigeBegin && op(t) >= vorigeBegin && op(t) <= vorigeEind;
+
+    const tx = alles.filter(inPeriode);
+    const vorige = alles.filter(inVorige);
+    const somIn = (rijen) => rijen.reduce((a, t) => a + Math.max(bedrag(t), 0), 0);
+    const somUit = (rijen) => rijen.reduce((a, t) => a + Math.max(-bedrag(t), 0), 0);
+    const netto = (rijen) => rijen.reduce((a, t) => a + bedrag(t), 0);
+
+    const inNu = somIn(tx), uitNu = somUit(tx), netNu = netto(tx);
+    const inVorig = somIn(vorige), uitVorig = somUit(vorige), netVorig = netto(vorige);
+    const maanden = [...new Set(tx.map(maand).filter(Boolean))].sort();
+    const perMaand = maanden.map((m) => {
+      const rij = tx.filter((t) => maand(t) === m);
+      return { maand: m, in: somIn(rij), uit: somUit(rij), net: netto(rij), aantal: rij.length };
+    });
+    const gemPerMaand = perMaand.length ? uitNu / perMaand.length : 0;
+    const dagen = Math.max(1, Math.round((eind - (begin || new Date((datums[0] || laatste) + "T00:00:00"))) / 86400000) + 1);
+
+    // Categorieën (alleen geld dat eruit ging; inkomsten horen niet in een uitgaven-grafiek)
+    const perCat = {};
+    tx.filter((t) => bedrag(t) < 0).forEach((t) => {
+      const c = t.category || "other";
+      const r = (perCat[c] = perCat[c] || { cat: c, uit: 0, aantal: 0, grootste: null });
+      r.uit += -bedrag(t);
+      r.aantal += 1;
+      if (!r.grootste || -bedrag(t) > -bedrag(r.grootste)) r.grootste = t;
+    });
+    const catRijen = Object.values(perCat).sort((a, b) => b.uit - a.uit);
+
+    // Tegenpartijen
+    const perHandelaar = {};
+    tx.forEach((t) => {
+      const n = naam(t);
+      const r = (perHandelaar[n] = perHandelaar[n] || { naam: n, uit: 0, in: 0, aantal: 0, maanden: new Set(), bedragen: [] });
+      if (bedrag(t) < 0) { r.uit += -bedrag(t); r.bedragen.push(-bedrag(t)); } else { r.in += bedrag(t); }
+      r.aantal += 1;
+      r.maanden.add(maand(t));
+    });
+    const handelaren = Object.values(perHandelaar).sort((a, b) => b.uit + b.in - (a.uit + a.in));
+    const topHandelaren = handelaren.filter((h) => h.uit > 0).slice(0, 10);
+
+    // Terugkerende bedragen: zelfde tegenpartij, in meerdere maanden, steeds ongeveer gelijk.
+    const minMaanden = Math.max(3, Math.ceil(maanden.length / 2));
+    const terugkerend = handelaren
+      .filter((h) => h.bedragen.length >= 3 && h.maanden.size >= minMaanden)
+      .map((h) => {
+        const gem = h.bedragen.reduce((a, b) => a + b, 0) / h.bedragen.length;
+        const afwijking = Math.max(...h.bedragen.map((b) => Math.abs(b - gem))) / (gem || 1);
+        return { naam: h.naam, gem, afwijking, maanden: h.maanden.size, aantal: h.aantal, totaal: h.uit };
+      })
+      .filter((h) => h.afwijking <= 0.25 && h.gem >= 1)
+      .sort((a, b) => b.gem - a.gem);
+    const vastPerMaand = terugkerend.reduce((a, h) => a + h.gem, 0);
+
+    // Grootste losse boekingen
+    const grootste = [...tx].sort((a, b) => Math.abs(bedrag(b)) - Math.abs(bedrag(a))).slice(0, 8);
+
+    // Feiten
+    const feiten = [];
+    const grootsteUit = tx.filter((t) => bedrag(t) < 0).sort((a, b) => bedrag(a) - bedrag(b))[0];
+    const grootsteIn = tx.filter((t) => bedrag(t) > 0).sort((a, b) => bedrag(b) - bedrag(a))[0];
+    const duursteMaand = [...perMaand].sort((a, b) => b.uit - a.uit)[0];
+    const vaakst = [...handelaren].sort((a, b) => b.aantal - a.aantal)[0];
+    if (grootsteUit) feiten.push({ label: "Biggest single expense", waarde: euro(-bedrag(grootsteUit)), sub: `${naam(grootsteUit)} · ${dag(grootsteUit)}` });
+    if (grootsteIn) feiten.push({ label: "Biggest single income", waarde: euro(bedrag(grootsteIn)), sub: `${naam(grootsteIn)} · ${dag(grootsteIn)}` });
+    if (catRijen.length) feiten.push({ label: "Biggest category", waarde: catRijen[0].cat, sub: `${euro(catRijen[0].uit)} · ${pct((catRijen[0].uit / (uitNu || 1)) * 100, 0)} of all spending` });
+    if (duursteMaand) feiten.push({ label: "Most expensive month", waarde: maandLabel(duursteMaand.maand), sub: `${euro(duursteMaand.uit)} out · ${euro(duursteMaand.in)} in` });
+    feiten.push({ label: "Average per day", waarde: euro(uitNu / dagen), sub: `over ${dagen} days` });
+    if (vaakst) feiten.push({ label: "Most frequent", waarde: vaakst.naam, sub: `${vaakst.aantal}× · ${euro(vaakst.uit + vaakst.in)} total` });
+
+    // Vorige periode: alleen tonen als die er echt is.
+    const delta = (nu, vorig, stijgingIsGoed) => {
+      if (!vorige.length) return "no earlier period in the data";
+      if (!vorig) return nu ? "nothing in the period before" : "—";
+      const d = ((nu - vorig) / Math.abs(vorig)) * 100;
+      const goed = (d >= 0) === !!stijgingIsGoed;
+      return `<span class="kpi-delta ${goed ? "pos" : "neg"}">${d >= 0 ? "+" : ""}${d.toFixed(0)}%</span> vs the previous ${periode.label.toLowerCase()}`;
+    };
+
+    // Oude grafieken opruimen voordat we opnieuw tekenen.
+    (this._insightCharts || []).forEach((c) => { try { c.destroy(); } catch (e) {} });
+    this._insightCharts = [];
+
+    if (!tx.length) {
+      page.innerHTML = `<div class="page-subheader page-subheader-row">
+          <p>No transactions in this period.</p>
+        </div>`;
+      return;
+    }
+
+    const periodeKnoppen = PERIODES.map((p) =>
+      `<button class="btn btn-sm ${p.id === periode.id ? "btn-primary" : "btn-outline"}" onclick="Pages._tekenInsights('${p.id}')">${p.label}</button>`
+    ).join("");
+
+    const catKleuren = { food: "#ff6b6b", transport: "#5b9aff", shopping: "#6c5ce7", housing: "#ff9f43", entertainment: "#ff7675", health: "#74b9ff", transfer: "#ffa726", income: "#00d68f", other: "#8888a0", dining: "#e17055", subscriptions: "#a29bfe" };
+    const palet = ["#ff6b6b", "#5b9aff", "#6c5ce7", "#ff9f43", "#ff7675", "#74b9ff", "#ffa726", "#00d68f", "#a29bfe", "#e17055", "#26c6da", "#d4a5ff", "#f6c85f", "#9ccc65"];
+    const kleur = (c, i) => catKleuren[c] || palet[i % palet.length];
+
+    const maxUit = catRijen.length ? catRijen[0].uit : 1;
+    const catTabel = catRijen.map((c, i) => `
+      <tr>
+        <td><span class="category-badge ${escapeHtml(c.cat)}">${escapeHtml(c.cat)}</span></td>
+        <td class="num">${euro(c.uit)}</td>
+        <td class="num">${pct((c.uit / (uitNu || 1)) * 100)}</td>
+        <td class="num">${c.aantal}</td>
+        <td class="num">${euro(c.uit / c.aantal)}</td>
+      </tr>`).join("");
+
+    const maxHandelaar = topHandelaren.length ? topHandelaren[0].uit : 1;
+    const handelaarLijst = topHandelaren.map((h) => `
+      <div class="bar-row">
+        <div class="bar-name" title="${escapeHtml(h.naam)}">${escapeHtml(h.naam)}</div>
+        <div class="bar-val">${euro(h.uit)} <span class="bar-count">${h.aantal}×</span></div>
+        <div class="bar-track"><div class="bar-fill" style="width:${((h.uit / maxHandelaar) * 100).toFixed(1)}%"></div></div>
+      </div>`).join("");
+
+    const grootsteLijst = grootste.map((t) => `
+      <tr class="tx-click-row" onclick="openTxDetail('${escapeHtml(String(t.id))}')" title="Click for everything about this transaction">
+        <td>${escapeHtml(dag(t))}</td>
+        <td class="bar-name">${escapeHtml(naam(t))}</td>
+        <td class="num ${bedrag(t) > 0 ? "amount-in" : "amount-out"}">${bedrag(t) > 0 ? "+" : "-"}${euro(bedrag(t))}</td>
+      </tr>`).join("");
+
+    const terugkerendLijst = terugkerend.length
+      ? terugkerend.map((h) => `
+        <tr>
+          <td class="bar-name">${escapeHtml(h.naam)}</td>
+          <td class="num">${euro(h.gem)}</td>
+          <td class="num">${h.maanden}/${maanden.length} mo</td>
+          <td class="num">${h.aantal}×</td>
+        </tr>`).join("")
+      : `<tr><td colspan="4" style="color:var(--text-muted);">Nothing that repeats with a steady amount in this period.</td></tr>`;
+
+    page.innerHTML = `
+      <div class="page-subheader page-subheader-row">
+        <p>${tx.length} transactions in this period · the newest booking in the data is ${laatste}${periode.dagen ? ` · ${isoLokaal(begin)} → ${laatste}` : ""}</p>
+        <div class="period-switch">${periodeKnoppen}</div>
+      </div>
+
+      <div class="kpi-grid">
+        <div class="balance-card">
+          <div class="balance-label">Money in</div>
+          <div class="balance-amount balance-positive">${euro(inNu)}</div>
+          <div class="balance-sub">${delta(inNu, inVorig, true)}</div>
+        </div>
+        <div class="balance-card">
+          <div class="balance-label">Money out</div>
+          <div class="balance-amount balance-negative">${euro(uitNu)}</div>
+          <div class="balance-sub">${delta(uitNu, uitVorig, false)}</div>
+        </div>
+        <div class="balance-card">
+          <div class="balance-label">Net</div>
+          <div class="balance-amount ${netNu >= 0 ? "balance-positive" : "balance-negative"}">${netNu >= 0 ? "+" : "-"}${euro(netNu)}</div>
+          <div class="balance-sub">${delta(netNu, netVorig, true)}</div>
+        </div>
+        <div class="balance-card">
+          <div class="balance-label">Average per month</div>
+          <div class="balance-amount">${euro(gemPerMaand)}</div>
+          <div class="balance-sub">out, over ${perMaand.length} month${perMaand.length === 1 ? "" : "s"}</div>
+        </div>
+        <div class="balance-card">
+          <div class="balance-label">Transactions</div>
+          <div class="balance-amount">${tx.length}</div>
+          <div class="balance-sub">${tx.filter((t) => bedrag(t) > 0).length} in · ${tx.filter((t) => bedrag(t) < 0).length} out</div>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <div class="chart-card full">
+          <div class="card-header">
+            <span class="card-title">Per month</span>
+            <span class="card-note">bars in / out · line = net</span>
           </div>
-          <div class="chart-card">
-            <div class="card-header">
-              <span class="card-title">Monthly Income vs Spending</span>
-            </div>
-            <canvas id="insightMonthlyChart"></canvas>
+          <canvas id="insightMonthly"></canvas>
+        </div>
+      </div>
+
+      <div class="insights-grid">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Where the money goes</span>
+            <span class="card-note">${catRijen.length} categories · ${euro(uitNu)} out</span>
           </div>
+          <canvas id="insightCats" style="max-height:230px;"></canvas>
+          <table class="mini-table">
+            <thead><tr><th>Category</th><th class="num">Out</th><th class="num">Share</th><th class="num">#</th><th class="num">Avg</th></tr></thead>
+            <tbody>${catTabel}</tbody>
+          </table>
         </div>
         <div class="card">
           <div class="card-header">
-            <span class="card-title">All Categories</span>
+            <span class="card-title">Top merchants</span>
+            <span class="card-note">where it went, most expensive first</span>
           </div>
-          <div class="table-container" style="border:none;">
-            <table>
-              <thead><tr><th>Category</th><th>Total</th><th>Transactions</th><th>Avg per transaction</th></tr></thead>
-              <tbody id="categoryTableBody"></tbody>
-            </table>
-          </div>
+          <div class="bar-list">${handelaarLijst || '<div class="empty-state"><p>No outgoing payments in this period.</p></div>'}</div>
         </div>
-      `;
+      </div>
 
-      if (spending.insights?.length) {
-        const colors = {
-          food: "#ff6b6b", transport: "#5b9aff", shopping: "#6c5ce7",
-          housing: "#ff9f43", entertainment: "#ff7675", health: "#74b9ff",
-          transfer: "#ffa726", income: "#00d68f", other: "#8888a0",
-          dining: "#e17055", subscriptions: "#a29bfe",
-        };
-        new Chart(document.getElementById("insightCategoryChart"), {
-          type: "doughnut",
-          data: {
-            labels: spending.insights.map((s) => s.category.charAt(0).toUpperCase() + s.category.slice(1)),
-            datasets: [{
-              data: spending.insights.map((s) => s.total),
-              backgroundColor: spending.insights.map((s) => colors[s.category] || "#8888a0"),
-              borderWidth: 0,
-            }],
+      <div class="insights-grid">
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Largest transactions</span>
+            <span class="card-note">click one for the full detail</span>
+          </div>
+          <table class="mini-table">
+            <thead><tr><th>Date</th><th>Counterparty</th><th class="num">Amount</th></tr></thead>
+            <tbody>${grootsteLijst}</tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">Likely recurring</span>
+            <span class="card-note">${euro(vastPerMaand)}/month across ${terugkerend.length}</span>
+          </div>
+          <table class="mini-table">
+            <thead><tr><th>Counterparty</th><th class="num">Per month</th><th class="num">Months</th><th class="num">Times</th></tr></thead>
+            <tbody>${terugkerendLijst}</tbody>
+          </table>
+          <div class="card-foot">Same counterparty, in at least ${minMaanden} of the ${maanden.length} months, with amounts within 25% of each other.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><span class="card-title">Notable</span></div>
+        <div class="fact-grid">
+          ${feiten.map((f) => `
+            <div class="fact">
+              <div class="fact-label">${escapeHtml(f.label)}</div>
+              <div class="fact-value">${escapeHtml(f.waarde)}</div>
+              <div class="fact-sub">${escapeHtml(f.sub)}</div>
+            </div>`).join("")}
+        </div>
+      </div>`;
+
+    // Klikken op een grote boeking opent hetzelfde detailpaneel als op Transactions.
+    window.__txDetail = {
+      rows: Object.fromEntries(tx.map((t) => [String(t.id), t])),
+      links: staat.links || {},
+      account: null,
+      accountsById: Object.fromEntries((staat.accounts || []).flatMap((r) => [[String(r.key), r], [String(r.id || ""), r]])),
+    };
+
+    const chartOpts = {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: "#8888a0", font: { size: 12 } } },
+        tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${euro(c.parsed.y !== undefined ? c.parsed.y : c.parsed)}` } },
+      },
+      scales: {
+        x: { grid: { color: "rgba(42,42,58,0.5)" }, ticks: { color: "#8888a0" } },
+        y: { grid: { color: "rgba(42,42,58,0.5)" }, ticks: { color: "#8888a0", callback: (v) => kort(v) } },
+      },
+    };
+
+    const elMaand = document.getElementById("insightMonthly");
+    if (elMaand) {
+      this._insightCharts.push(new Chart(elMaand, {
+        type: "bar",
+        data: {
+          labels: perMaand.map((m) => maandLabel(m.maand)),
+          datasets: [
+            { label: "In", data: perMaand.map((m) => m.in), backgroundColor: "rgba(0,214,143,0.35)", borderColor: "#00d68f", borderWidth: 1, borderRadius: 4 },
+            { label: "Out", data: perMaand.map((m) => m.uit), backgroundColor: "rgba(255,107,107,0.35)", borderColor: "#ff6b6b", borderWidth: 1, borderRadius: 4 },
+            { label: "Net", type: "line", data: perMaand.map((m) => m.net), borderColor: "#6c5ce7", backgroundColor: "#6c5ce7", borderWidth: 2, tension: 0.3, pointRadius: 3 },
+          ],
+        },
+        options: chartOpts,
+      }));
+    }
+
+    const elCat = document.getElementById("insightCats");
+    if (elCat) {
+      this._insightCharts.push(new Chart(elCat, {
+        type: "doughnut",
+        data: {
+          labels: catRijen.map((c) => c.cat),
+          datasets: [{ data: catRijen.map((c) => c.uit), backgroundColor: catRijen.map((c, i) => kleur(c.cat, i)), borderWidth: 0 }],
+        },
+        options: {
+          responsive: true,
+          cutout: "58%",
+          plugins: {
+            legend: { position: "right", labels: { color: "#8888a0", font: { size: 12 }, boxWidth: 12 } },
+            tooltip: { callbacks: { label: (c) => ` ${c.label}: ${euro(c.parsed)} (${pct((c.parsed / (uitNu || 1)) * 100)})` } },
           },
-          options: {
-            responsive: true,
-            plugins: {
-              legend: { position: "right", labels: { color: "#8888a0", font: { size: 12 } } },
-            },
-            cutout: "60%",
-          },
-        });
+        },
+      }));
+    }
+  },
+
+  async accounts() {
+    const page = document.getElementById("page-content");
+    page.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading accounts...</p></div>`;
+
+    try {
+      const data = await API.get("/api/accounts/overview");
+      const accounts = data.accounts || [];
+
+      if (!accounts.length) {
+        page.innerHTML = `<div class="empty-state"><p>No accounts yet.</p>
+          <p style="font-size:13px;">Connect a bank via <a href="#connect" style="color:var(--accent);">Connect bank</a>.</p></div>`;
+        return;
       }
 
-      const months = (monthly.months || []).reverse();
-      if (months.length) {
-        new Chart(document.getElementById("insightMonthlyChart"), {
-          type: "bar",
-          data: {
-            labels: months.map((m) => {
-              const [y, mo] = m.month.split("-");
-              return new Date(y, mo - 1).toLocaleString("default", { month: "short" });
-            }),
-            datasets: [
-              {
-                label: "Income",
-                data: months.map((m) => m.income),
-                backgroundColor: "rgba(0, 214, 143, 0.3)",
-                borderColor: "#00d68f",
-                borderWidth: 1,
-                borderRadius: 4,
-              },
-              {
-                label: "Spending",
-                data: months.map((m) => m.spending),
-                backgroundColor: "rgba(255, 107, 107, 0.3)",
-                borderColor: "#ff6b6b",
-                borderWidth: 1,
-                borderRadius: 4,
-              },
-            ],
-          },
-          options: {
-            responsive: true,
-            plugins: {
-              legend: { labels: { color: "#8888a0", font: { size: 12 } } },
-            },
-            scales: {
-              x: { grid: { color: "rgba(42,42,58,0.5)" }, ticks: { color: "#8888a0" } },
-              y: { grid: { color: "rgba(42,42,58,0.5)" }, ticks: { color: "#8888a0" } },
-            },
-          },
-        });
-      }
+      const euro = (b) =>
+        new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(b || 0);
 
-      const tbody = document.getElementById("categoryTableBody");
-      if (spending.insights?.length && tbody) {
-        tbody.innerHTML = spending.insights
-          .map((s) => `
-          <tr>
-            <td><span class="category-badge ${s.category}">${s.category}</span></td>
-            <td style="font-weight:600;">€${s.total.toLocaleString()}</td>
-            <td>${s.count} transactions</td>
-            <td>€${(s.total / s.count).toFixed(2)}</td>
-          </tr>`)
-          .join("");
-      }
+      const card = (r) => {
+        const kindLabel = r.kind === "savings" ? "Savings account" : r.kind === "broker" ? "Brokerage account" : "Current account";
+        const subtitle = r.predicted
+          ? `baseline ${r.baseline_date} · ${r.tx_count} transfer${r.tx_count === 1 ? "" : "s"}`
+          : `${r.tx_count} transactions${r.first_tx ? " · from " + r.first_tx : ""}`;
+        return `
+          <div class="account-card" onclick="location.hash='#transactions?acc=${encodeURIComponent(r.key)}'">
+            <div class="account-head">
+              <span class="account-name">${escapeHtml(r.name || "Account")}</span>
+              <span class="account-label ${r.predicted ? "predicted" : ""}">${r.predicted ? "predicted" : "bank"}</span>
+            </div>
+            <div class="account-kind">${kindLabel}</div>
+            <div class="account-number">${escapeHtml(r.display_number || "")}</div>
+            <div class="account-balance">${euro(r.balance)}</div>
+            <div class="account-sub">${escapeHtml(subtitle)}</div>
+          </div>`;
+      };
+
+      page.innerHTML = `
+        <div class="account-total"><span>Total</span><strong>${euro(data.total)}</strong></div>
+        <p class="hint">Click an account for its transactions. Accounts marked "predicted" have no statement of their own: they are derived from the transfers on your current account.</p>
+        <div class="account-grid">${accounts.map(card).join("")}</div>`;
     } catch (e) {
-      page.innerHTML = `<div class="error-banner">Could not load insights: ${e.message}</div>`;
+      page.innerHTML = `<div class="error-banner">Could not load accounts: ${escapeHtml(e.message)}</div>`;
     }
   },
 
   async transactions() {
     const page = document.getElementById("page-content");
+    const acc = paginaParams().acc || "";
     page.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading transactions...</p></div>`;
 
     try {
-      const data = await API.get("/api/transactions?limit=100&days=90");
+      const vraag = acc
+        ? API.get(`/api/transactions?limit=50000&account_key=${encodeURIComponent(acc)}`)
+        : API.get("/api/transactions?limit=50000");
 
-      if (!data.transactions?.length) {
-        page.innerHTML = `
-          <div class="empty-state">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            <p>No transactions found.</p>
-            <p style="font-size:13px;">Connect a bank account and sync to see your transactions here.</p>
-          </div>`;
-        return;
-      }
+      const [overzicht, data] = await Promise.all([API.get("/api/accounts/overview"), vraag]);
+      const accounts = overzicht.accounts || [];
+      const active = accounts.find((r) => String(r.key) === String(acc));
+      const tx = data.transactions || [];
+      const links = data.links || {};
 
-      page.innerHTML = `
-        <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
-          <input type="text" id="txSearch" placeholder="Search transactions..." style="flex:1;min-width:200px;padding:10px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-family:inherit;font-size:14px;">
-          <select id="txCategory" style="padding:10px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-family:inherit;font-size:14px;">
-            <option value="">All categories</option>
-            ${[...new Set(data.transactions.map((t) => t.category || "other"))]
-              .map((c) => `<option value="${c}">${c.charAt(0).toUpperCase() + c.slice(1)}</option>`)
-              .join("")}
-          </select>
-        </div>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Description</th>
-                <th>Category</th>
-                <th style="text-align:right;">Amount</th>
-              </tr>
-            </thead>
-            <tbody id="txBody"></tbody>
-          </table>
-        </div>
-        <p style="text-align:center;color:var(--text-muted);margin-top:12px;font-size:13px;">Showing ${data.transactions.length} transactions (last 90 days)</p>
-      `;
-
-      const tbody = document.getElementById("txBody");
-      const renderTx = (tx) => {
-        const isIncome = tx.amount > 0;
-        const formatted = new Intl.NumberFormat("en-EU", {
-          style: "currency",
-          currency: tx.currency || "EUR",
-        }).format(Math.abs(tx.amount));
-
-        return `
-          <tr>
-            <td style="white-space:nowrap;color:var(--text-secondary);">${tx.booking_date || "--"}</td>
-            <td>${tx.description || tx.merchant_name || "Unknown"}</td>
-            <td><span class="category-badge ${tx.category || "other"}">${tx.category || "other"}</span></td>
-            <td class="amount-cell ${isIncome ? "balance-positive" : "balance-negative"}">${isIncome ? "+" : "-"}${formatted}</td>
-          </tr>`;
+      // Doorklikken: een overboeking naar de spaar of IBKR brengt je naar die
+      // account, en andersom weer terug naar de boeking op je betaalrekening.
+      const doorlink = (t) => {
+        const naar = links[String(t.id)];
+        if (naar) return { url: `#transactions?acc=${encodeURIComponent(naar.key)}`, text: `→ ${naar.name}` };
+        if (t.predicted && t.source_tx_id)
+          return { url: `#transactions?acc=${t.source_account_id}&tx=${encodeURIComponent(t.source_tx_id)}`, text: "→ your current account" };
+        return null;
       };
 
-      let allTx = data.transactions;
-      tbody.innerHTML = allTx.map(renderTx).join("");
+      // Alles van deze rij bewaren, zodat er op een boeking geklikt kan worden.
+      window.__txDetail = {
+        rows: Object.fromEntries(tx.map((t) => [String(t.id), t])),
+        links,
+        account: active || null,
+        // Zodat een rij ook de rekeningnaam kan tonen als je "All" bekijkt.
+        accountsById: Object.fromEntries(
+          accounts.flatMap((r) => [[String(r.key), r], [String(r.id || ""), r]])
+        ),
+      };
 
-      document.getElementById("txSearch").addEventListener("input", filterTx);
-      document.getElementById("txCategory").addEventListener("change", filterTx);
+      const euro = (b) =>
+        new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(Math.abs(b || 0));
 
-      function filterTx() {
+      const chips = [`<a class="chip ${!acc ? "active" : ""}" href="#transactions">All</a>`]
+        .concat(
+          accounts.map(
+            (r) => `<a class="chip ${String(r.key) === String(acc) ? "active" : ""}" href="#transactions?acc=${encodeURIComponent(r.key)}">${escapeHtml(r.name)}</a>`
+          )
+        )
+        .join("");
+
+      const bereik = tx.length
+        ? `${data.count ?? tx.length} transactions · ${String(tx[tx.length - 1].booking_date).slice(0, 10)} → ${String(tx[0].booking_date).slice(0, 10)}`
+        : "0 transactions";
+
+      const kop = active
+        ? `<div class="account-header">
+             <div>
+               <div class="account-name">${escapeHtml(active.name)}</div>
+               <div class="account-number">${escapeHtml(active.display_number || "")}</div>
+             </div>
+             <div class="account-balance">${euro(active.balance)}</div>
+           </div>
+           <div class="account-meta">
+             <span>${bereik}</span>
+             <span class="amount-in">+${euro(data.total_in)}</span>
+             <span class="amount-out">-${euro(data.total_out)}</span>
+             ${active.predicted ? '<span class="account-label predicted">predicted from transfers</span>' : ""}
+           </div>`
+        : `<div class="account-meta"><span>${bereik}</span></div>`;
+
+      page.innerHTML = `
+        <div class="chip-row">${chips}</div>
+        ${kop}
+        <div class="tx-tools">
+          <input type="text" id="txSearch" placeholder="Search...">
+          <select id="txCategory">
+            <option value="">All categories</option>
+            ${[...new Set(tx.map((t) => t.category || "overig"))]
+              .map((c) => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`)
+              .join("")}
+          </select>
+          <select id="txSoort">
+            <option value="">All</option>
+            <option value="in">In only</option>
+            <option value="uit">Out only</option>
+          </select>
+        </div>
+        <div id="txLijst"></div>`;
+
+      const teken = (rijen) => {
+        if (!rijen.length) return '<div class="empty-state"><p>No transactions.</p></div>';
+        const perMonth = {};
+        rijen.forEach((t) => {
+          const month = (t.booking_date || "").slice(0, 7) || "unknown";
+          (perMonth[month] = perMonth[month] || []).push(t);
+        });
+        return Object.keys(perMonth)
+          .sort()
+          .reverse()
+          .map((month) => {
+            const rows = perMonth[month];
+            const bin = rows.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+            const bout = rows.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0);
+            const naam = month === "unknown"
+              ? "Unknown"
+              : new Date(month + "-01").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+            return `
+              <div class="month-block">
+                <div class="month-head">
+                  <span>${naam}</span>
+                  <span class="month-sums"><span class="amount-in">+${euro(bin)}</span><span class="amount-out">-${euro(bout)}</span></span>
+                </div>
+                ${rows
+                  .map(
+                    (t) => `
+                <div class="tx-row" data-tx-id="${escapeHtml(String(t.id))}">
+                  <div class="tx-date">${(t.booking_date || "").slice(8, 10)}-${(t.booking_date || "").slice(5, 7)}</div>
+                  <div class="tx-text">
+                    <span class="tx-name">${escapeHtml(t.description || t.merchant_name || "Unknown")}</span>
+                    <span class="tx-sub">${escapeHtml(t.merchant_name || "")}${t.predicted ? ' <span class="tx-predicted">predicted</span>' : ""}${t.voor_ijkpunt ? ' <span class="tx-old">before baseline</span>' : ""}</span>
+                    ${doorlink(t) ? `<a class="tx-link" href="${doorlink(t).url}">${escapeHtml(doorlink(t).text)}</a>` : ""}
+                  </div>
+                  <div class="tx-amount ${t.amount > 0 ? "balance-positive" : "balance-negative"}">${t.amount > 0 ? "+" : "-"}${euro(t.amount)}</div>
+                </div>`
+                  )
+                  .join("")}
+              </div>`;
+          })
+          .join("");
+      };
+
+      let zichtbaar = tx;
+      const filter = () => {
         const q = document.getElementById("txSearch").value.toLowerCase();
         const cat = document.getElementById("txCategory").value;
-        const filtered = allTx.filter(
+        const kindLabel = document.getElementById("txSoort").value;
+        zichtbaar = tx.filter(
           (t) =>
-            (t.description || "").toLowerCase().includes(q) &&
-            (!cat || t.category === cat)
+            // Vrije tekst van de bank, IBAN en referentie doen mee in de zoekbalk.
+            [t.description, t.merchant_name, t.remittance, t.counterparty_iban,
+             t.reference_number, t.type_description]
+              .join(" ")
+              .toLowerCase()
+              .includes(q) &&
+            (!cat || (t.category || "overig") === cat) &&
+            (!kindLabel || (kindLabel === "in" ? t.amount > 0 : t.amount < 0))
         );
-        tbody.innerHTML = filtered.length
-          ? filtered.map(renderTx).join("")
-          : '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px;">No matching transactions</td></tr>';
+        document.getElementById("txLijst").innerHTML = teken(zichtbaar);
+      };
+      document.getElementById("txSearch").addEventListener("input", filter);
+      document.getElementById("txCategory").addEventListener("change", filter);
+      document.getElementById("txSoort").addEventListener("change", filter);
+      document.getElementById("txLijst").innerHTML = teken(zichtbaar);
+
+      // Klikken op een boeking: alles wat het dashboard van die boeking heeft.
+      document.getElementById("txLijst").addEventListener("click", (e) => {
+        if (e.target.closest(".tx-link")) return;
+        const rij = e.target.closest(".tx-row");
+        if (rij) openTxDetail(rij.dataset.txId);
+      });
+
+      // Aankomen met ?tx=... : de boeking waar je vandaan kwam oplichten.
+      const gezocht = paginaParams().tx;
+      if (gezocht) {
+        const rij = document.querySelector(`[data-tx-id="${CSS.escape(gezocht)}"]`);
+        if (rij) {
+          rij.classList.add("selected");
+          rij.scrollIntoView({ block: "center" });
+        }
       }
     } catch (e) {
-      page.innerHTML = `<div class="error-banner">Could not load transactions: ${e.message}</div>`;
+      page.innerHTML = `<div class="error-banner">Could not load transactions: ${escapeHtml(e.message)}</div>`;
     }
   },
 
@@ -519,44 +911,79 @@ const Pages = {
     const page = document.getElementById("page-content");
     page.innerHTML = `<div class="loading"><div class="spinner"></div><p>Loading banks...</p></div>`;
 
+    const euro = (v) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(v || 0);
+    const datum = (s) => (s ? new Date(String(s).replace(" ", "T")).toLocaleDateString("en-GB") : "--");
+
     try {
-      const data = await API.get("/api/accounts/banks");
+      const [data, ext] = await Promise.all([
+        API.get("/api/accounts/banks"),
+        API.get("/api/external/accounts"),
+      ]);
       const banks = data.banks || [];
+      const external = ext.accounts || [];
+      const candidates = ext.candidates || [];
 
       if (banks.length === 0) {
         page.innerHTML = `
+          <div class="page-subheader page-subheader-row">
+            <p>Manage your connected bank accounts and the accounts the dashboard derives itself.</p>
+            ${CONNECT_BANK_BTN}
+          </div>
           <div class="empty-state">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="6" width="20" height="14" rx="2"/><path d="M2 10h20"/></svg>
-            <p>No banks connected yet.</p>
+            <p>No bank connected yet.</p>
             <p style="font-size:13px;margin-top:4px;"><a href="#connect" style="color:var(--accent);">Connect a bank</a> to get started.</p>
           </div>`;
         return;
       }
 
+      let attentie = "";
+      banks.filter((b) => b.state && b.state !== "ok").forEach((b) => {
+        const isExpired = b.state === "verlopen";
+        const isDisconnected = b.state === "losgekoppeld";
+        const kop = isDisconnected
+          ? `Disconnected${b.removed_at ? " on " + datum(b.removed_at) : ""}`
+          : isExpired
+            ? `Session expired${b.last_checked ? " (last seen " + datum(b.last_checked) + ")" : ""}`
+            : `Session expires soon: ${b.days_left} days left`;
+        const uitleg = isDisconnected
+          ? "The history is still here; you just won't get new transactions. Reconnect to keep syncing."
+          : isExpired
+            ? "The bank no longer returns new transactions. Everything below is the last retrieved state."
+            : "After that syncing stops silently. Reconnect now to prevent that.";
+        attentie += `
+          <div class="alert ${isExpired ? "alert-red" : "alert-orange"}">
+            <div class="alert-body">
+              <div class="alert-title">${kop} · ${b.bank_name}</div>
+              <div class="alert-text">${uitleg}${b.last_error ? `<br><span class="alert-mono">${b.last_error}</span>` : ""}</div>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="reconnectBank(${b.id}, '${b.bank_name}', '${b.bank_country || ""}')">Reconnect</button>
+          </div>`;
+      });
+
       const bankColors = ["#6c5ce7", "#00d68f", "#5b9aff", "#ff6b6b", "#ff9f43", "#ff7675", "#74b9ff", "#a29bfe"];
+      const statusWord = { AUTHORIZED: "Valid", EXPIRED: "Expired", REVOKED: "Revoked", PENDING: "Pending", SUSPENDED: "Suspended", REMOVED: "Disconnected" };
 
       let html = "";
       for (let i = 0; i < banks.length; i++) {
         const bank = banks[i];
         const color = bankColors[i % bankColors.length];
-        const total = new Intl.NumberFormat("en-EU", {
-          style: "currency",
-          currency: "EUR",
-        }).format(bank.total_balance || 0);
+        const total = euro(bank.total_balance);
+        const created = datum(bank.created_at);
+        const initial = (bank.bank_name || "?").charAt(0).toUpperCase();
 
-        const created = new Date(bank.created_at + "Z").toLocaleDateString("nl-NL");
-        const expires = bank.expires_at ? new Date(bank.expires_at + "Z").toLocaleDateString("nl-NL") : "--";
-        const initial = bank.bank_name.charAt(0).toUpperCase();
+        const badge = bank.state === "ok" ? "badge-ok" : bank.state === "verlopen" ? "badge-bad" : "badge-warn";
+        const woord = statusWord[bank.status] || bank.status || "Unknown";
+        const daysText = bank.days_left === null || bank.days_left === undefined
+          ? ""
+          : bank.days_left >= 0
+            ? ` · ${bank.days_left} day${bank.days_left === 1 ? "" : "s"} left`
+            : ` · ${Math.abs(bank.days_left)} daysText te laat`;
+        const validText = bank.valid_until ? `until ${datum(bank.valid_until)}` : "no end date from the bank";
 
         let accountsHtml = "";
         for (const acc of bank.accounts || []) {
-          const bal = new Intl.NumberFormat("en-EU", {
-            style: "currency",
-            currency: acc.currency || "EUR",
-          }).format(acc.balance || 0);
-
           const signClass = (acc.balance || 0) >= 0 ? "balance-positive" : "balance-negative";
-          const syncDate = acc.last_synced ? new Date(acc.last_synced + "Z").toLocaleDateString("nl-NL") : "--";
           accountsHtml += `
             <div class="bank-account-row">
               <div class="bank-account-info">
@@ -564,8 +991,8 @@ const Pages = {
                 <div class="bank-account-iban">${acc.iban ? acc.iban.slice(0, 22) + "..." : acc.account_type || ""}</div>
               </div>
               <div class="bank-account-detail">
-                <span class="bank-account-sync">${syncDate}</span>
-                <span class="bank-account-balance ${signClass}">${bal}</span>
+                <span class="bank-account-sync">${acc.last_synced ? "synced " + datum(acc.last_synced) : ""}</span>
+                <span class="bank-account-balance ${signClass}">${euro(acc.balance)}</span>
               </div>
             </div>`;
         }
@@ -577,29 +1004,36 @@ const Pages = {
                 <div class="bank-card-icon">${initial}</div>
                 <div class="bank-card-info">
                   <div class="bank-card-name">${bank.bank_name}</div>
-                  <div class="bank-card-sub">${bank.accounts.length} account${bank.accounts.length !== 1 ? "en" : ""} · Sinds ${created}</div>
+                  <div class="bank-card-sub">${bank.accounts.length} account${bank.accounts.length !== 1 ? "s" : ""} · connected ${created}</div>
                 </div>
               </div>
               <div class="bank-card-actions">
                 <div class="bank-card-total">${total}</div>
+                <button class="btn btn-outline btn-sm" onclick="reconnectBank(${bank.id}, '${bank.bank_name}', '${bank.bank_country || ""}')">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
+                  Reconnect
+                </button>
                 <button class="btn btn-danger btn-sm" onclick="showDisconnectModal(${bank.id}, '${bank.bank_name}')">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
                     <polyline points="16 17 21 12 16 7"/>
                     <line x1="21" y1="12" x2="9" y2="12"/>
                   </svg>
-                  Ontkoppelen
+                  Disconnect
                 </button>
               </div>
             </div>
             <div class="bank-card-body">
-              <div class="bank-card-meta">
-                <span>Verbinding verloopt: ${expires}</span>
+              <div class="bank-card-meta session-line">
+                <span class="badge ${badge}">${woord}</span>
+                <span>Session ${validText}${daysText}</span>
+                <span>checked ${datum(bank.last_checked)}</span>
               </div>
+              ${bank.last_error ? `<div class="alert alert-red alert-klein"><div class="alert-body"><div class="alert-text"><span class="alert-mono">${bank.last_error}</span></div></div></div>` : ""}
               <div class="bank-accounts-list">
                 <div class="bank-accounts-header">
-                  <span>Rekeningen</span>
-                  <span>Saldo</span>
+                  <span>Accounts</span>
+                  <span>Balance</span>
                 </div>
                 ${accountsHtml}
               </div>
@@ -607,12 +1041,73 @@ const Pages = {
           </div>`;
       }
 
+      const externHtml = external.map((a) => {
+        const bewegingen = (a.moves || []).slice().reverse().slice(0, 6);
+        const moves = bewegingen.length
+          ? bewegingen.map((m) => `
+              <div class="ext-move">
+                <span class="ext-move-date">${m.date}</span>
+                <span class="ext-move-text">${m.description}</span>
+                <span class="ext-move-amount ${m.amount >= 0 ? "balance-positive" : "balance-negative"}">${m.amount >= 0 ? "+" : ""}${euro(m.amount)}</span>
+              </div>`).join("")
+          : `<div class="ext-move ext-move-empty"><span>No transfers since the baseline</span></div>`;
+        return `
+          <div class="bank-card">
+            <div class="bank-card-header" style="--bank-color: #5b9aff;">
+              <div class="bank-card-brand">
+                <div class="bank-card-icon">${(a.name || "?").charAt(0).toUpperCase()}</div>
+                <div class="bank-card-info">
+                  <div class="bank-card-name">${a.name} <span class="badge badge-warn">predicted</span></div>
+                  <div class="bank-card-sub">${a.iban || a.account_number || "no IBAN"} · baseline ${euro(a.baseline)} on ${a.baseline_date || "--"}</div>
+                </div>
+              </div>
+              <div class="bank-card-actions">
+                <div class="bank-card-total">${euro(a.balance)}</div>
+              </div>
+            </div>
+            <div class="bank-card-body">
+              <div class="bank-card-meta">
+                <span>${a.delta === 0 ? "No transfers since the baseline" : `${a.delta >= 0 ? "+" : ""}${euro(a.delta)} in transfers`}</span>
+                <span>${a.source === "firefly" ? "baseline from Firefly" : a.source} · updated ${datum(a.updated_at)}</span>
+              </div>
+              <div class="ext-moves">${moves}</div>
+            </div>
+          </div>`;
+      }).join("");
+
+      const kandidaten = candidates.length
+        ? `
+        <div class="card" style="margin-top:20px;">
+          <div class="card-header"><span class="card-title">Transfers not linked to an account (${candidates.length})</span></div>
+          <p class="hint">These look like transfers to a savings or brokerage account, but no account is linked to them. Link the account or add a keyword in the bridge config to count them.</p>
+          <div class="ext-moves">
+            ${candidates.map((c) => `
+              <div class="ext-move">
+                <span class="ext-move-date">${c.date}</span>
+                <span class="ext-move-text">${c.description}</span>
+                <span class="ext-move-amount ${c.amount >= 0 ? "balance-positive" : "balance-negative"}">${c.amount >= 0 ? "+" : ""}${euro(c.amount)}</span>
+              </div>`).join("")}
+          </div>
+        </div>`
+        : "";
+
       page.innerHTML = `
-        <div class="page-subheader">
-          <p>Beheer je aangesloten bankrekeningen.</p>
+        <div class="page-subheader page-subheader-row">
+          <p>Manage your connected bank accounts and the accounts the dashboard derives itself.</p>
+          ${CONNECT_BANK_BTN}
         </div>
-        <input type="text" id="banksSearch" placeholder="Zoek op banknaam..." class="search-input" oninput="filterBanksList()" style="margin-bottom:16px;">
+        ${attentie}
+        <input type="text" id="banksSearch" placeholder="Search by bank name..." class="search-input" oninput="filterBanksList()" style="margin-bottom:16px;">
         <div class="banks-grid">${html}</div>
+        ${external.length ? `
+          <h3 class="section-head">Outside the bank <span class="badge badge-warn">predicted</span></h3>
+          <p class="hint">These accounts are not in Rabobank's PSD2 consent. The balance is the baseline from Firefly plus every transfer to or from your current account since then. If the baseline is off, adjust the balance in Firefly; the next run recalculates.</p>
+          <div class="banks-grid">${externHtml}</div>` : `
+          <div class="empty-state">
+            <p>No accounts outside the bank yet.</p>
+            <p style="font-size:13px;margin-top:4px;">Run the Firefly bridge to see your savings accounts and IBKR here.</p>
+          </div>`}
+        ${kandidaten}
         <div id="disconnectOverlay" class="modal-overlay" style="display:none;" onclick="closeDisconnectModal(event)">
           <div class="modal-box" onclick="event.stopPropagation()">
             <div class="modal-icon">
@@ -621,12 +1116,12 @@ const Pages = {
                 <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
               </svg>
             </div>
-            <h3 id="disconnectBankName">Bank ontkoppelen?</h3>
-            <p>Alle rekeninggegevens en transacties van deze bank worden verwijderd. Dit kan niet ongedaan worden gemaakt.</p>
+            <h3 id="disconnectBankName">Disconnect bank?</h3>
+            <p>No new transactions will come in. The history that is already there is kept, because the bank only goes back a limited time. You can undo disconnecting later by reconnecting.</p>
             <div class="modal-actions">
-              <button class="btn btn-outline" onclick="closeDisconnectModal()">Annuleren</button>
+              <button class="btn btn-outline" onclick="closeDisconnectModal()">Cancel</button>
               <button class="btn btn-danger" id="confirmDisconnectBtn" onclick="confirmDisconnect()">
-                Ja, ontkoppelen
+                Yes, disconnect
               </button>
             </div>
           </div>
@@ -646,6 +1141,10 @@ const Pages = {
     const selectedModel = aiSettings.model || "";
 
     page.innerHTML = `
+      <div class="page-subheader page-subheader-row">
+        <p>Let AI suggest categories for your transactions and ask questions about your money. You always review before anything is applied.</p>
+        ${AI_SETTINGS_BTN}
+      </div>
       <div class="ai-page">
         <!-- Categorize Section -->
         <div class="card" style="margin-bottom:20px;">
@@ -1004,6 +1503,119 @@ function addAiChatMsg(text, isUser) {
   messages.scrollTop = messages.scrollHeight;
 }
 
+// Connect-knop: stond als los nav-item in de zijbalk, hoort nu rechtsboven op de Banks-pagina.
+const CONNECT_BANK_BTN = `<button class="btn btn-primary btn-sm" onclick="location.hash = '#connect'">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Connect bank
+          </button>`;
+
+// AI-instellingen: stond als los nav-item in de zijbalk, hoort nu rechtsboven op de AI-pagina.
+const AI_SETTINGS_BTN = `<button class="btn btn-outline btn-sm" onclick="location.hash = '#ai-settings'">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            AI settings
+          </button>`;
+
+// ── Boekingsdetail: klik op een rij voor alles wat er van die boeking bekend is ──
+
+function txEuro(v) {
+  return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(Math.abs(v || 0));
+}
+
+function txRij(label, waarde) {
+  const leeg = waarde === null || waarde === undefined || waarde === "" || waarde === "null";
+  return `<div class="tx-detail-row"><span class="tx-detail-label">${escapeHtml(label)}</span>
+    <span class="tx-detail-value${leeg ? " leeg" : ""}">${leeg ? "not provided" : escapeHtml(String(waarde))}</span></div>`;
+}
+
+// Zelfde rij, maar met regeleindes erin (de vrije betaaltekst van de bank).
+function txRijLang(label, waarde) {
+  const leeg = waarde === null || waarde === undefined || waarde === "";
+  return `<div class="tx-detail-row"><span class="tx-detail-label">${escapeHtml(label)}</span>
+    <span class="tx-detail-value${leeg ? " leeg" : ""}" style="white-space:pre-wrap">${leeg ? "not provided" : escapeHtml(String(waarde))}</span></div>`;
+}
+
+function txLijst(...waarden) {
+  return waarden.filter((w) => w !== null && w !== undefined && w !== "").join(" · ");
+}
+
+// De bank-respons zit als tekst in raw_json; in de dump laten we hem uitgeklapt zien.
+function txRuw(t) {
+  if (!t || !t.raw_json) return t;
+  try {
+    return Object.assign({}, t, { raw_json: JSON.parse(t.raw_json) });
+  } catch (e) {
+    return t;
+  }
+}
+
+function openTxDetail(id) {
+  closeTxDetail();
+  const staat = window.__txDetail || {};
+  const t = (staat.rows || {})[String(id)];
+  if (!t) return;
+
+  // Rekening van deze boeking: de gekozen rekening, anders opzoeken op id/key.
+  const rek = (staat.accountsById || {})[String(t.account_key || t.account_id)] || staat.account;
+  const link = (staat.links || {})[String(t.id)];
+  const teken = t.amount > 0 ? "+" : "-";
+  const bron = String(t.id).startsWith("pdf-")
+    ? "pdf-import (2018 statement)"
+    : "bank (PSD2 / Enable Banking)";
+
+  const overlay = document.createElement("div");
+  overlay.className = "modal-overlay";
+  overlay.id = "txDetailOverlay";
+  overlay.style.display = "flex";
+  overlay.onclick = (e) => { if (e.target === overlay) closeTxDetail(); };
+  overlay.innerHTML = `
+    <div class="modal-box tx-detail-box" onclick="event.stopPropagation()">
+      <div class="tx-detail-head">
+        <div>
+          <div class="tx-detail-title">${escapeHtml(t.description || t.merchant_name || "Unknown")}</div>
+          <div class="tx-detail-date">${escapeHtml(String(t.booking_date || ""))}${rek ? " · " + escapeHtml(rek.name) : ""}</div>
+        </div>
+        <div class="tx-detail-amount ${t.amount > 0 ? "amount-in" : "amount-out"}">${teken}${txEuro(t.amount)}</div>
+      </div>
+      ${txRij("Date", t.booking_date)}
+      ${txRij("Value date", t.value_date)}
+      ${txRij("Amount", teken + txEuro(t.amount) + " " + (t.currency || "EUR"))}
+      ${txRij("Direction", t.amount > 0 ? "in" : "out")}
+      ${txRij("Status", t.status)}
+      ${txRij("Type", txLijst(t.type_code, t.type_sub_code, t.type_description))}
+      ${txRij("Category", t.category)}
+      ${txRij("Description", t.description)}
+      ${txRij("Merchant", t.merchant_name)}
+      ${txRij("Counterparty IBAN", t.counterparty_iban)}
+      ${txRij("Reference", txLijst(t.reference_number_schema, t.reference_number))}
+      ${txRijLang("Remittance", t.remittance)}
+      ${txRij("Running balance", t.running_balance)}
+      ${txRij("Account", rek ? rek.name + " · " + (rek.display_number || rek.iban || "") : (t.account_key || t.account_id))}
+      ${txRij("Account key", t.account_key || t.account_id)}
+      ${txRij("Bank reference", t.id)}
+      ${txRij("Source", bron)}
+      ${txRij("First seen by dashboard", t.inserted_at)}
+      ${t.predicted ? txRij("Predicted", "yes — no statement of its own, derived from the transfers on your current account") : ""}
+      ${t.voor_ijkpunt ? txRij("Baseline", "before the Firefly baseline — not counted in the balance") : ""}
+      ${t.source_tx_id ? txRij("Comes from transaction", t.source_tx_id + (t.source_account_id ? " on " + t.source_account_id : "")) : ""}
+      ${link ? `<div class="tx-detail-link">Transfers to <a href="#transactions?acc=${encodeURIComponent(link.key)}">${escapeHtml(link.name)}</a></div>` : ""}
+      <details class="tx-detail-raw">
+        <summary>Everything the dashboard has for this transaction</summary>
+        <pre>${escapeHtml(JSON.stringify(txRuw(t), null, 2))}</pre>
+      </details>
+      <div class="modal-actions"><button class="btn btn-outline" onclick="closeTxDetail()">Close</button></div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function closeTxDetail() {
+  const el = document.getElementById("txDetailOverlay");
+  if (el) el.remove();
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeTxDetail();
+});
+
 // ── Shared Helpers ────────────────────────────────────────────────────
 
 function escapeHtml(text) {
@@ -1060,7 +1672,7 @@ let _disconnectId = null;
 
 function showDisconnectModal(id, bankName) {
   _disconnectId = id;
-  document.getElementById("disconnectBankName").textContent = `${bankName} ontkoppelen?`;
+  document.getElementById("disconnectBankName").textContent = `${bankName} disconnect?`;
   document.getElementById("disconnectOverlay").style.display = "flex";
 }
 
@@ -1074,7 +1686,7 @@ async function confirmDisconnect() {
   if (!_disconnectId) return;
   const btn = document.getElementById("confirmDisconnectBtn");
   btn.disabled = true;
-  btn.textContent = "Bezig...";
+  btn.textContent = "Working...";
   try {
     const res = await fetch(`/api/auth/connections/${_disconnectId}`, { method: "DELETE" });
     if (!res.ok) throw new Error("Failed to disconnect");
@@ -1083,19 +1695,28 @@ async function confirmDisconnect() {
   } catch (e) {
     console.error("Disconnect error:", e);
     btn.disabled = false;
-    btn.textContent = "Ja, ontkoppelen";
+    btn.textContent = "Yes, disconnect";
   }
 }
 
 // Navigation
+// Hash kan een account meedragen: #transactions?acc=firefly:3
+function paginaParams() {
+  const [naam, query] = window.location.hash.replace("#", "").split("?");
+  const params = {};
+  new URLSearchParams(query || "").forEach((v, k) => { params[k] = v; });
+  params.page = naam || "home";
+  return params;
+}
+
 function navigate(page) {
   document.querySelectorAll(".nav-item").forEach((el) => el.classList.remove("active"));
   const navEl = document.querySelector(`[data-page="${page}"]`);
   if (navEl) navEl.classList.add("active");
 
   const titles = {
-    home: "Dashboard", insights: "Insights", transactions: "Transactions",
-    connect: "Connect Bank", banks: "Banks", ai: "AI", "ai-settings": "AI Settings",
+    home: "Dashboard", insights: "Insights", accounts: "Accounts", transactions: "Transactions",
+    connect: "Connect bank", banks: "Banks", ai: "AI", "ai-settings": "AI settings",
   };
   document.getElementById("page-title").textContent = titles[page] || "Dashboard";
 
@@ -1126,6 +1747,12 @@ function filterBanksList() {
 }
 
 // Sync
+// Reconnect: dezelfde bank, een verse sessie, dezelfde rekeningrijen.
+function reconnectBank(id, name, country) {
+  const params = new URLSearchParams({ name: name || "", country: country || "" });
+  window.location.href = `/api/auth/reconnect/${id}?${params.toString()}`;
+}
+
 async function syncAll() {
   const btn = document.querySelector(".header-actions .btn-primary");
   const original = btn.textContent;
@@ -1143,16 +1770,12 @@ async function syncAll() {
 }
 
 // Router
-window.addEventListener("hashchange", () => {
-  const page = window.location.hash.replace("#", "") || "home";
-  navigate(page);
-});
+window.addEventListener("hashchange", () => navigate(paginaParams().page));
 
 // Init
 document.addEventListener("DOMContentLoaded", async () => {
   await loadAiSettings();
-  const page = window.location.hash.replace("#", "") || "home";
-  navigate(page);
+  navigate(paginaParams().page);
 });
 
 // Check for connection success

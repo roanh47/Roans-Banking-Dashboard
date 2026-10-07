@@ -1,4 +1,10 @@
 CATEGORY_RULES = [
+    # Vaste partijen die geen rekening in het dashboard zijn, maar een uitgave:
+    # TradingShenzhen (aankoop Xiaomi), Wise Europe (betaling, o.a. fursuit),
+    # Revolut (gedeelde rekening met vriend).
+    (["tradingshenzhen", "trading shenzhen"], "shopping"),
+    (["wise europe"], "shopping"),
+    (["revolut"], "transfer"),
     # Income
     (["salaris", "salary", "aab inz", "tikkie"], "income"),
     # Food & groceries

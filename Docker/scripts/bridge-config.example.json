@@ -1,0 +1,23 @@
+{
+  "_uitleg": "Kopieer naar bridge-config.json en vul je eigen Firefly-rekening-id's en trefwoorden in.",
+  "firefly_url": "http://127.0.0.1:8085",
+  "dashboard_url": "http://127.0.0.1:8200",
+  "push_token": "<hetzelfde als PUSH_TOKEN in de .env van het dashboard>",
+  "firefly_token_file": "/pad/naar/firefly_token.txt",
+  "accounts": [
+    {
+      "firefly_id": 1,
+      "kind": "savings",
+      "keywords": [
+        "voorbeeld trefwoord"
+      ]
+    },
+    {
+      "firefly_id": 2,
+      "kind": "broker",
+      "keywords": [
+        "voorbeeld broker"
+      ]
+    }
+  ]
+}

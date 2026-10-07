@@ -113,6 +113,16 @@ class EnableBankingClient:
         data = self.get_session(session_id)
         return data.get("accounts", [])
 
+    def account_details(self, account_id: str) -> dict:
+        """Naam, IBAN en valuta van één rekening (de sessie geeft alleen uids)."""
+        resp = requests.get(
+            f"{self.BASE_URL}/accounts/{account_id}/details",
+            headers=self._headers(),
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     def get_balances(self, account_id: str) -> list:
         """Fetch balances for a specific account. Uses app JWT."""
         resp = requests.get(

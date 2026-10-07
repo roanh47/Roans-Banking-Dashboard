@@ -1,33 +1,36 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pathlib import Path
-
 from app.database import init_db
-from app.routers import auth, accounts, transactions, insights, sync, chat, recategorize, ai
+from app.routers import (
+    accounts,
+    ai,
+    auth,
+    chat,
+    external,
+    insights,
+    sync,
+    transactions,
+)
 
-app = FastAPI(title="Roan's Banking Dashboard")
+app = FastAPI(title="Banking Dashboard", version="1.1.0")
 
-# Initialize database
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 init_db()
 
-# API routers
 app.include_router(auth.router)
 app.include_router(accounts.router)
+app.include_router(sync.router)
 app.include_router(transactions.router)
 app.include_router(insights.router)
-app.include_router(sync.router)
-app.include_router(chat.router)
-app.include_router(recategorize.router)
+app.include_router(external.router)
 app.include_router(ai.router)
+app.include_router(chat.router)
 
-# Serve frontend static files
-static_dir = Path("/app/static")
-if static_dir.exists():
-    app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="frontend")
-
-
-@app.on_event("startup")
-async def startup():
-    """Ensure database is ready on startup."""
-    init_db()
+app.mount("/", StaticFiles(directory="/app/static", html=True), name="static")
