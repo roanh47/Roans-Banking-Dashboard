@@ -11,7 +11,17 @@ geld dat van de spaarrekening terugkomt gaat er weer af. Zo loopt het saldo mee
 zonder dat de bank het levert.
 """
 
+from datetime import date, datetime, timedelta
+
 from app.database import get_db
+
+
+def _dag(waarde):
+    """'2026-10-02' -> date()."""
+    try:
+        return datetime.strptime((waarde or "")[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
 
 # Overboekingen herkennen we aan het IBAN van de tegenpartij als de bank dat
 # meestuurt. Rabobank doet dat via PSD2 niet, dus in de praktijk doen de
@@ -84,6 +94,61 @@ def _koppelparen(rijen, koppel):
     return uit
 
 
+def eigen_rijen(conn, rekening):
+    """Boekingen die direct op deze rekening staan, uit een geïmporteerd afschrift.
+
+    De bank levert de spaarrekeningen niet via PSD2, maar hun afschriften kunnen
+    wel geïmporteerd worden (scripts/import_pdf_statement.py). Die rijen hangen
+    onder de sleutel van de rekening zelf (bijv. 'firefly:3') en zijn dus de
+    echte geschiedenis in plaats van een afgeleide.
+    """
+    return conn.execute(
+        "SELECT * FROM transactions WHERE account_id = ? ORDER BY booking_date, id",
+        (rekening["key"],),
+    ).fetchall()
+
+
+def recurring(conn, rekening):
+    """Terugkerende bedragen op deze rekening, bijvoorbeeld de maandstorting op school.
+
+    Alleen reeksen met minimaal drie boekingen en een mediane tussenpoos van
+    ongeveer een maand. Jaarlijkse rente valt daar dus buiten.
+    """
+    groepen = {}
+    for rij in eigen_rijen(conn, rekening):
+        bedrag = round(float(rij["amount"] or 0.0), 2)
+        if not bedrag:
+            continue
+        groepen.setdefault((rij["counterparty_iban"] or "", bedrag), []).append(rij)
+    # Alles wat al langer dan twee tussenpozen geleden is gestopt, is geen
+    # voorspelling meer maar geschiedenis.
+    nu = _dag(rekening["balance_date"]) or date.today()
+    uit = []
+    for (tegen, bedrag), rijen in groepen.items():
+        datums = [d for d in (_dag(r["booking_date"]) for r in rijen) if d]
+        if len(datums) < 3:
+            continue
+        datums.sort()
+        tussen = sorted((b - a).days for a, b in zip(datums, datums[1:]))
+        mediaan = tussen[len(tussen) // 2]
+        if not 25 <= mediaan <= 35:
+            continue
+        if (nu - datums[-1]).days > mediaan * 2:
+            continue
+        uit.append({
+            "description": rijen[-1]["description"] or "",
+            "amount": bedrag,
+            "counterparty_iban": tegen,
+            "every_days": mediaan,
+            "count": len(datums),
+            "first": datums[0].isoformat(),
+            "last": datums[-1].isoformat(),
+            # Wat je mag verwachten als er niets verandert.
+            "next_expected": (datums[-1] + timedelta(days=mediaan)).isoformat(),
+        })
+    return sorted(uit, key=lambda x: -abs(x["amount"]))
+
+
 def moves_for(conn, rekening, rijen=None):
     """Interne overboekingen die bij deze rekening horen.
 
@@ -118,6 +183,20 @@ def moves_for(conn, rekening, rijen=None):
             "tx_id": rij["id"],
             "account_id": rij["account_id"],
         })
+    # Boekingen uit een geïmporteerd afschrift van deze rekening zelf: echte
+    # geschiedenis. Ze tellen nooit mee in het saldo, want het ijkpunt van de
+    # rekening is juist het eindsaldo van datzelfde afschrift.
+    for rij in eigen_rijen(conn, rekening):
+        uit.append({
+            "date": (rij["booking_date"] or "")[:10],
+            "amount": round(float(rij["amount"] or 0.0), 2),
+            "description": rij["description"] or "",
+            "matched_by": "afschrift",
+            "voor_ijkpunt": True,
+            "tx_id": rij["id"],
+            "account_id": rij["account_id"],
+        })
+    uit.sort(key=lambda b: (b["date"], str(b["tx_id"])))
     return uit
 
 
@@ -181,9 +260,13 @@ def derived_accounts(conn=None):
     uit = []
     for rekening in conn.execute("SELECT * FROM external_accounts ORDER BY kind, label").fetchall():
         bewegingen = moves_for(conn, rekening, rijen)
+        eigen = eigen_rijen(conn, rekening)
         # Boekingen van vóór het ijkpunt zitten al in het saldo van Firefly.
         delta = round(sum(b["amount"] for b in bewegingen if not b["voor_ijkpunt"]), 2)
         ijkpunt = round(float(rekening["balance"] or 0.0), 2)
+        vast = recurring(conn, rekening)
+        per_maand = round(sum(r["amount"] for r in vast), 2)
+        saldo = round(ijkpunt + delta, 2)
         uit.append({
             "id": rekening["id"],
             "key": rekening["key"],
@@ -191,11 +274,17 @@ def derived_accounts(conn=None):
             "kind": rekening["kind"] or "savings",
             "iban": rekening["iban"],
             "account_number": rekening["account_number"],
-            "balance": round(ijkpunt + delta, 2),
+            "balance": saldo,
             "baseline": ijkpunt,
             "baseline_date": (rekening["balance_date"] or "")[:10],
             "delta": delta,
             "moves": bewegingen,
+            # Eigen afschrift-regels en wat daar met vaste regelmaat terugkomt.
+            "statement_rows": len(eigen),
+            "first_statement_date": (eigen[0]["booking_date"] or "")[:10] if eigen else None,
+            "recurring": vast,
+            "monthly": per_maand,
+            "projection_12m": round(saldo + per_maand * 12, 2) if vast else None,
             "predicted": True,
             "source": rekening["source"],
             "updated_at": rekening["updated_at"],

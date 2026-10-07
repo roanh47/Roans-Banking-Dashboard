@@ -148,6 +148,13 @@ def accounts_overview():
             "baseline_date": a["baseline_date"],
             "delta": a["delta"],
             "overboeking": True,
+            # Wat er met vaste regelmaat op deze rekening binnenkomt, en waar je
+            # dan over twaalf maanden staat als dat zo doorgaat.
+            "statement_rows": a.get("statement_rows"),
+            "first_statement_date": a.get("first_statement_date"),
+            "recurring": a.get("recurring"),
+            "monthly": a.get("monthly"),
+            "projection_12m": a.get("projection_12m"),
         })
 
     conn.close()

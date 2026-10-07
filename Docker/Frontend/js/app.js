@@ -761,6 +761,8 @@ const Pages = {
              <span class="amount-in">+${euro(data.total_in)}</span>
              <span class="amount-out">-${euro(data.total_out)}</span>
              ${active.predicted ? '<span class="account-label predicted">predicted from transfers</span>' : ""}
+             ${(active.recurring || []).map((r) => `<span class="account-label">recurring ${r.amount >= 0 ? "+" : ""}${euro(r.amount)} every ~${r.every_days} days · next expected ${r.next_expected}</span>`).join("")}
+             ${active.projection_12m != null ? `<span class="account-label">at this rate in 12 months: ${euro(active.projection_12m)}</span>` : ""}
            </div>`
         : `<div class="account-meta"><span>${bereik}</span></div>`;
 
@@ -1051,6 +1053,12 @@ const Pages = {
                 <span class="ext-move-amount ${m.amount >= 0 ? "balance-positive" : "balance-negative"}">${m.amount >= 0 ? "+" : ""}${euro(m.amount)}</span>
               </div>`).join("")
           : `<div class="ext-move ext-move-empty"><span>No transfers since the baseline</span></div>`;
+        const vast = (a.recurring || []).map((r) => `
+              <div class="ext-move">
+                <span class="ext-move-date">${r.next_expected}</span>
+                <span class="ext-move-text">${r.description}</span>
+                <span class="ext-move-amount ${r.amount >= 0 ? "balance-positive" : "balance-negative"}">expected ${r.amount >= 0 ? "+" : ""}${euro(r.amount)}</span>
+              </div>`).join("");
         return `
           <div class="bank-card">
             <div class="bank-card-header" style="--bank-color: #5b9aff;">
@@ -1068,8 +1076,9 @@ const Pages = {
             <div class="bank-card-body">
               <div class="bank-card-meta">
                 <span>${a.delta === 0 ? "No transfers since the baseline" : `${a.delta >= 0 ? "+" : ""}${euro(a.delta)} in transfers`}</span>
-                <span>${a.source === "firefly" ? "baseline from Firefly" : a.source} · updated ${datum(a.updated_at)}</span>
+                <span>${a.statement_rows ? `${a.statement_rows} statement entries since ${a.first_statement_date}` : `${a.source === "firefly" ? "baseline from Firefly" : a.source}`} · updated ${datum(a.updated_at)}</span>
               </div>
+              ${vast ? `<div class="ext-moves">${vast}</div><div class="ext-move ext-move-empty"><span>Recurring, from ${(a.recurring[0].count)} statement entries (${a.recurring[0].first} – ${a.recurring[0].last})</span></div>` : ""}
               <div class="ext-moves">${moves}</div>
             </div>
           </div>`;
