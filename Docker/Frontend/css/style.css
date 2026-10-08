@@ -332,6 +332,7 @@ tr:hover { background: var(--bg-card-hover); }
 .category-badge.other { background: var(--bg-secondary); color: var(--text-muted); }
 .category-badge.dining { background: rgba(225, 112, 85, 0.15); color: #e17055; }
 .category-badge.subscriptions { background: rgba(162, 155, 254, 0.15); color: #a29bfe; }
+.category-badge.education { background: rgba(0, 194, 168, 0.15); color: #00c2a8; }
 
 /* Connect Bank Page */
 .connect-container {
@@ -634,16 +635,80 @@ tr:hover { background: var(--bg-card-hover); }
 }
 
 /* Responsive */
+/* Telefoon/tablet: de navigatie gaat naar de onderkant als balk, zodat de
+   volle breedte naar de inhoud gaat. Ruimte voor de duim + safe-area. */
 @media (max-width: 768px) {
-  .sidebar { width: 64px; }
-  .sidebar-nav span, .brand-text { display: none; }
-  .sidebar-brand { padding: 16px; justify-content: center; }
-  .nav-item { justify-content: center; padding: 12px; }
-  .main-content { padding: 20px 16px; }
+  #app {
+    flex-direction: column-reverse;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  /* Het merkblok kost alleen hoogte in een balk onderaan. */
+  .sidebar-brand { display: none; }
+
+  .sidebar-nav {
+    flex-direction: row;
+    justify-content: space-between;
+    gap: 0;
+    padding: 6px;
+  }
+
+  .nav-item {
+    flex: 1 1 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 7px 2px;
+    font-size: 10px;
+    line-height: 1.15;
+    letter-spacing: -0.1px;
+    text-align: center;
+    min-width: 0;
+  }
+
+  .nav-item span {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .nav-item svg { width: 18px; height: 18px; }
+
+  .main-content {
+    flex: 1;
+    min-height: 0;
+    padding: 16px 12px;
+    max-width: none;
+  }
+
   .charts-grid { grid-template-columns: 1fr; }
   .balance-grid { grid-template-columns: 1fr; }
   .page-header { flex-direction: column; align-items: flex-start; gap: 12px; }
   .connect-layout { grid-template-columns: 1fr; }
+
+  /* Chatknoppen mogen niet op de navigatiebalk liggen. */
+  .bankbot-fab {
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+    right: 12px;
+  }
+
+  #bankbot-chat {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-height: 62vh;
+    bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 /* Connections list */

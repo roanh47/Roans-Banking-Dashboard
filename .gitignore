@@ -3,6 +3,7 @@
 
 # Private keys
 config/private.pem
+config/private-categorize.json
 *.pem
 
 # Python

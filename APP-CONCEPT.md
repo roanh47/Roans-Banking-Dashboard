@@ -82,7 +82,7 @@ Roans-Banking-Dashboard/
 This is the key screen. It has these sections:
 
 ### 1. Server connection
-- **Server URL** — text input (e.g. `https://banking.roanheemstra.nl` or `http://192.168.1.x:8200`)
+- **Server URL** — text input (e.g. `https://banking.example.com` or `http://192.168.1.x:8200`)
 - **Connection status** — green dot if reachable, red if not
 - **Test connection** button
 

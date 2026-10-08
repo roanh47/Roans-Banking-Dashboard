@@ -19,9 +19,9 @@ Config: bridge-config.json naast dit script (staat niet in git).
       "push_token": "<hetzelfde als PUSH_TOKEN in de .env van het dashboard>",
       "firefly_token_file": "/tmp/ff_token.txt",
       "accounts": [
-        {"firefly_id": 3,   "kind": "savings", "keywords": ["vrij spaargeld"]},
-        {"firefly_id": 272, "kind": "savings", "keywords": []},
-        {"firefly_id": 274, "kind": "broker",  "keywords": ["ibkr"]}
+        {"firefly_id": 41, "kind": "savings", "keywords": ["spaarrekening"]},
+        {"firefly_id": 42, "kind": "savings", "keywords": []},
+        {"firefly_id": 43, "kind": "broker",  "keywords": ["ibkr"]}
       ]
     }
 

@@ -3,7 +3,7 @@ from app.database import get_db
 from app.enable_banking import EnableBankingClient
 from app.routers.auth import parse_account, session_validity, store_accounts
 from datetime import datetime, timedelta
-from app.categorize import categorize
+from app.categorize import categorize, learned_map
 
 import json
 import requests
@@ -130,6 +130,8 @@ def _code(tx: dict, sleutel: str) -> str:
 def sync_all():
     """Sync balances and transactions for all connected bank accounts."""
     conn = get_db()
+    # Eén keer per sync: hoe zijn deze tegenpartijen de vorige keren ingedeeld?
+    learned = learned_map(conn)
     # Losgekoppelde banken slaan we over; hun historiek blijft wel staan.
     connections = conn.execute(
         "SELECT * FROM bank_connections WHERE COALESCE(status, '') <> 'REMOVED'"
@@ -217,7 +219,7 @@ def sync_all():
                     acc_id = details.get("account_id") or {}
                     if isinstance(acc_id, dict):
                         iban = acc_id.get("iban") or ""
-                    # Rabobank stuurt hier de naam van de houder ("R.M. Heemstra"),
+                    # Rabobank stuurt hier de naam van de houder ("A. Voorbeeld"),
                     # niet de rekeningnaam. Voor een betaalrekening tonen we daarom
                     # "Betaalrekening".
                     naam = details.get("name") or details.get("display_name") or ""
@@ -334,7 +336,13 @@ def sync_all():
 
                     booking_date = tx.get("booking_date") or tx.get("bookingDate") or tx.get("value_date", "")
                     value_date = _tekst(tx.get("value_date") or tx.get("valueDate"))[:10]
-                    category = categorize(counterparty, "")
+                    category = categorize(
+                        counterparty,
+                        remittance,
+                        amount=amount,
+                        counterparty_iban=_iban_van_tegenpartij(tx, cdi),
+                        learned=learned,
+                    )
 
                     conn.execute(
                         """INSERT OR REPLACE INTO transactions

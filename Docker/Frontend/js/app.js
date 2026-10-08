@@ -235,7 +235,7 @@ const Pages = {
           food: "#ff6b6b", transport: "#5b9aff", shopping: "#6c5ce7",
           housing: "#ff9f43", entertainment: "#ff7675", health: "#74b9ff",
           transfer: "#ffa726", income: "#00d68f", other: "#8888a0",
-          dining: "#e17055", subscriptions: "#a29bfe",
+          dining: "#e17055", subscriptions: "#a29bfe", education: "#00c2a8",
         };
         new Chart(document.getElementById("categoryChart"), {
           type: "doughnut",

@@ -1,0 +1,5 @@
+{
+  "_uitleg": "Kopieer naar config/private-categorize.json (staat in .gitignore). Hier staan de namen die niet in een publieke repo horen.",
+  "eigen": ["eigen naam", "naam partner of huisgenoot"],
+  "inkomen": ["familienaam die geld overmaakt", "afkorting van je werkgever"]
+}

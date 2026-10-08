@@ -9,6 +9,7 @@ from app.routers import (
     chat,
     external,
     insights,
+    recategorize,
     sync,
     transactions,
 )
@@ -32,5 +33,6 @@ app.include_router(insights.router)
 app.include_router(external.router)
 app.include_router(ai.router)
 app.include_router(chat.router)
+app.include_router(recategorize.router)
 
 app.mount("/", StaticFiles(directory="/app/static", html=True), name="static")

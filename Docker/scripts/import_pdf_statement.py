@@ -24,7 +24,7 @@ Twee afschrift-layouts worden herkend (automatisch):
     Bedrag bij (credit). Daar is het type altijd 'db' en bepaalt de kolom waarin
     het bedrag staat de richting; de controle gebeurt met beginsaldo + bij - af = eindsaldo.
 """
-import argparse, hashlib, itertools, json, re, sqlite3, sys, unicodedata
+import argparse, hashlib, itertools, json, os, re, sqlite3, sys, unicodedata
 from collections import Counter, defaultdict
 from datetime import datetime
 
@@ -161,7 +161,27 @@ SPAAR_STOP = re.compile(r'^(Blad\b.*|(?:vervolg\s+)?Rekeningafschrift\b.*|Totaal
                         r'cp =|db =|eb =|ec =|ei =|ga =|gb =|id =|kh =|ok =|pc =|sb =|sp =|st =|tb =|'
                         r'te =|wb =|we =|wr =|bv =)')
 SPAAR_HEAD = ('Rente', 'Type Tegenrekening', 'Naam/omschrijving', 'vervolg Rekeningafschrift')
-SPAAR_FOOT = re.compile(r'^(Ten name van|Winsumerweg|9959 TD|R\.M\. Heemstra|M\.I\.|A\.B\.|Rabo |IBAN|BIC|RABONL2U)$')
+# Regels in de voettekst van een afschrift die niets met een boeking te maken hebben.
+# Algemene gevallen staan hieronder; je eigen naam en adres horen niet in een publieke
+# repo en komen uit config/private-categorize.json ("statement_noise").
+SPAAR_FOOT = re.compile(r'^(Ten name van|Rabo |IBAN|BIC|RABONL2U)$')
+PRIVE_PAD = os.environ.get(
+    "PRIVATE_CATEGORIZE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "config", "private-categorize.json"),
+)
+
+
+def _eigen_ruis():
+    """Extra voettekst-regels van jouw afschrift (naam, adres) uit de prive-config."""
+    try:
+        with open(PRIVE_PAD, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return set()
+    return {str(w).strip().upper() for w in data.get("statement_noise", []) if str(w).strip()}
+
+
+EIGEN_RUIS = _eigen_ruis()
 
 
 def parse_savings(text):
@@ -231,7 +251,7 @@ def parse_savings(text):
                 elif SPAAR_NUM.match(b):
                     if bedrag is None:
                         bedrag = b
-                elif not SPAAR_FOOT.match(b) and not b.startswith('Verwerkingsdatum'):
+                elif not SPAAR_FOOT.match(b) and b.upper() not in EIGEN_RUIS and not b.startswith('Verwerkingsdatum'):
                     desc.append(b)
                 j += 1
             if bedrag:
@@ -259,7 +279,7 @@ def _plak(desc):
     """Afschriftregels zijn hard afgebroken: plak afgebroken woorden weer aan elkaar.
 
     Alleen een kort fragment (1-2 letters) direct achter een woord wordt geplakt; losse
-    woorden als 'eo' in 'A.B. Heemstra eo' blijven staan. De WISSEL-markering zet de parser
+    woorden als 'eo' in 'A. Voorbeeld eo' blijven staan. De WISSEL-markering zet de parser
     tussen de regels, zodat een echte spatie nooit per ongeluk verdwijnt.
     """
     def _een(m):
