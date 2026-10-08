@@ -45,6 +45,9 @@ _EIGEN_PRIVE, _INKOMEN_PRIVE = _prive()
 # Betaalprocessoren zetten hun eigen naam voor die van de winkel:
 # "Zettle_*E Golge Foodt", "NYX*VendingWork", "CCV*Bakkerij Jansen".
 PROCESSORS = (
+    "mol*",
+    "stichting mollie",
+    "via stichting mollie",
     "zettle", "izettle", "nyx", "sumup", "sum up", "ccv", "mollie", "adyen",
     "buckaroo", "paypal", "sq *", "worldline", "globalcollect", "global collect",
     "stripe", "multisafepay", "pay.nl", "paynl", "easypay", "ems ", "ingenico",
@@ -65,6 +68,7 @@ INKOMEN_PUBLIEK = (
     "salaris", "loon", "salary", "studiefinanciering", "duo ", "zorgtoeslag",
     "huurtoeslag", "kindgebonden", "kinderbijslag", "toeslag", "zakgeld",
     "storting", "deposit", "terugstorting", "schenking",
+    "rvo", "rente over", "subsidie",
 )
 INKOMEN = INKOMEN_PUBLIEK + tuple(_INKOMEN_PRIVE)
 
@@ -134,6 +138,7 @@ CATEGORY_RULES = [
       "perry sport", "sport 2000", "fietsen", "bike", "so low", "solow",
       "aliexpress", "temu", "shein", "tradingshenzhen", "trading shenzhen",
       "alipay", "g2a", "kinguin", "eneba", "csfloat", "marktplaats",
+      "megekko", "mac voor minder", "bb-nothing",
       "vinted", "catawiki", "cex", "gamemania", "intertoys", "bart smit",
       "kijkshop", "juwelier", "opticien", "brillen", "schoenen",
       "sportwinkel", "edc retail", "meubel", "bedden", "wonen", "mobielwerkt",
