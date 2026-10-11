@@ -14,7 +14,7 @@ def spending_insights(days: int = 30):
         """
         SELECT category, SUM(ABS(amount)) as total, COUNT(*) as count
         FROM transactions
-        WHERE booking_date >= ? AND amount < 0
+        WHERE booking_date >= ? AND amount < 0 AND category != 'transfer'
         GROUP BY category
         ORDER BY total DESC
         """,
@@ -31,8 +31,8 @@ def monthly_overview():
     rows = conn.execute(
         """
         SELECT strftime('%Y-%m', booking_date) as month,
-               SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END) as income,
-               SUM(CASE WHEN amount < 0 THEN ABS(amount) ELSE 0 END) as spending
+               SUM(CASE WHEN amount > 0 AND category != 'transfer' THEN amount ELSE 0 END) as income,
+               SUM(CASE WHEN amount < 0 AND category != 'transfer' THEN ABS(amount) ELSE 0 END) as spending
         FROM transactions
         GROUP BY month
         ORDER BY month DESC
@@ -55,6 +55,7 @@ def top_merchants(days: int = 30, limit: int = 10):
                COUNT(*) as count
         FROM transactions
         WHERE booking_date >= ? AND amount < 0 AND merchant_name IS NOT NULL
+          AND category != 'transfer'
         GROUP BY merchant
         ORDER BY total DESC
         LIMIT ?

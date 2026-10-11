@@ -709,6 +709,35 @@ tr:hover { background: var(--bg-card-hover); }
     max-height: 62vh;
     bottom: calc(140px + env(safe-area-inset-bottom, 0px));
   }
+
+  /* Niets mag van het scherm aflopen. Rijen met bedrag + knoppen wikkelen of
+     krimpen, anders valt de rechterknop half buiten beeld (de Disconnect-knop
+     op de bankkaart). */
+  html, body { overflow-x: hidden; }
+  .main-content {
+    padding: 14px 12px calc(18px + env(safe-area-inset-bottom, 0px));
+    overflow-x: hidden;
+    max-width: none;
+  }
+  .card, .bank-card, .balance-card, .connection-item, .chart-card { min-width: 0; }
+
+  .bank-card-header { flex-wrap: wrap; padding: 14px 16px; gap: 10px; }
+  .bank-card-actions { width: 100%; flex-wrap: wrap; gap: 8px; }
+  .bank-card-total { margin-right: auto; font-size: 18px; }
+  .bank-card-meta { padding: 10px 16px; flex-wrap: wrap; gap: 6px 12px; }
+  .bank-accounts-header, .account-row, .bank-account-row { padding-left: 16px; padding-right: 16px; }
+  .connection-item { flex-wrap: wrap; gap: 8px; }
+
+  /* Tikbare dingen: minimaal 36px hoog, anders mis je ze met je duim. */
+  .btn { min-height: 36px; }
+
+  .mini-table { font-size: 12px; }
+  .mini-table th, .mini-table td { padding: 7px 6px; }
+
+  /* Actieve tab: rustige achtergrond i.p.v. een paars blok over het icoon. */
+  .sidebar-nav { padding: 6px 6px calc(8px + env(safe-area-inset-bottom, 0px)); }
+  .nav-item.active { background: rgba(108, 92, 231, 0.16); color: var(--text-primary); }
+  .nav-item.active svg { color: var(--accent); }
 }
 
 /* Connections list */
@@ -1248,4 +1277,63 @@ tr:hover { background: var(--bg-card-hover); }
 @media (max-width: 640px) {
   .period-switch { width: 100%; }
   .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+}
+
+
+/* ==========================================================================
+   Telefoon (<= 768px). Staat bewust achteraan in het bestand: binnen dezelfde
+   specificiteit wint de laatste regel, en de pagina-opbouw hierboven zet
+   breedtes die anders alsnog doorwerken op een smal scherm.
+   ========================================================================== */
+@media (max-width: 768px) {
+  /* Kolommen en kaarten mogen krimpen tot de schermbreedte. Zonder min-width: 0
+     blijft de inhoud z'n eigen minimum houden en loopt het scherm uit (dan valt
+     de rechterkant van een kaart of tabel weg). */
+  #page-content, .main-content, .card, .chart-card, .kpi-grid, .charts-grid,
+  .insights-grid, .balance-grid, .fact-grid, .bank-card, .bank-card-body {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .kpi-grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .charts-grid, .insights-grid, .fact-grid { grid-template-columns: 1fr; gap: 12px; }
+
+  /* Tabellen scrollen binnen hun kaart horizontaal in plaats van de hele
+     pagina breder te maken. */
+  .mini-table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    font-size: 12px;
+  }
+  .mini-table th, .mini-table td { padding: 7px 6px; white-space: nowrap; }
+
+  /* Rijen met een naam + bedrag: naam krimpt met stippellijn, bedrag blijft heel. */
+  .mini-table td, .bar-row .bar-name, .tx-name, .ext-move-text { min-width: 0; }
+  .ext-move { grid-template-columns: 60px 1fr auto; }
+  /* Namen die niet passen krijgen een stippellijn i.p.v. hard afgekapt te worden. */
+  .ext-move-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* Vijf kolommen passen niet op 390px; het aandeel staat ook al in de donut. */
+  .mini-table .col-share { display: none; }
+
+  .page-header h1 { font-size: 22px; }
+  .card { padding: 14px 14px; }
+  .card h2, .card h3 { font-size: 15px; }
+}
+
+/* Kleine telefoons (<= 430px): het label 'Transactions' paste niet in zijn vak. */
+@media (max-width: 430px) {
+  .nav-item { font-size: 9px; padding: 7px 0; gap: 3px; }
+  .nav-item svg, .nav-item .nav-icon { width: 17px; height: 17px; }
+  .nav-item span { letter-spacing: -0.2px; }
+}
+
+/* Tweekoloms blokken (o.a. de home-pagina) klappen op een telefoon naar 1 kolom.
+   Dit stond eerder als inline style in de HTML; die wint van de stylesheet. */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 768px) {
+  .two-col { grid-template-columns: 1fr; gap: 12px; }
+  .two-col > *, .kpi-grid > *, .charts-grid > *, .insights-grid > * { min-width: 0; }
 }

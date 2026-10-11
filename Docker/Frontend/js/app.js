@@ -141,7 +141,7 @@ const Pages = {
             <canvas id="monthlyChart"></canvas>
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="two-col">
           <div class="card">
             <div class="card-header">
               <span class="card-title">Spending by Category</span>
@@ -364,8 +364,13 @@ const Pages = {
     const inPeriode = (t) => !begin || op(t) >= begin;
     const inVorige = (t) => !!vorigeBegin && op(t) >= vorigeBegin && op(t) <= vorigeEind;
 
-    const tx = alles.filter(inPeriode);
-    const vorige = alles.filter(inVorige);
+    // Overboekingen tussen je eigen rekeningen tellen niet mee: geld dat naar je
+    // spaarrekening gaat en daarna als collegegeld weer weggaat is één uitgave,
+    // niet twee. Alles met categorie "transfer" valt af.
+    const eigenBoeking = (t) => (t.category || "other") !== "transfer";
+    const meetellen = alles.filter(eigenBoeking);
+    const tx = meetellen.filter(inPeriode);
+    const vorige = meetellen.filter(inVorige);
     const somIn = (rijen) => rijen.reduce((a, t) => a + Math.max(bedrag(t), 0), 0);
     const somUit = (rijen) => rijen.reduce((a, t) => a + Math.max(-bedrag(t), 0), 0);
     const netto = (rijen) => rijen.reduce((a, t) => a + bedrag(t), 0);
@@ -465,7 +470,7 @@ const Pages = {
       <tr>
         <td><span class="category-badge ${escapeHtml(c.cat)}">${escapeHtml(c.cat)}</span></td>
         <td class="num">${euro(c.uit)}</td>
-        <td class="num">${pct((c.uit / (uitNu || 1)) * 100)}</td>
+        <td class="num col-share">${pct((c.uit / (uitNu || 1)) * 100)}</td>
         <td class="num">${c.aantal}</td>
         <td class="num">${euro(c.uit / c.aantal)}</td>
       </tr>`).join("");
@@ -497,7 +502,7 @@ const Pages = {
 
     page.innerHTML = `
       <div class="page-subheader page-subheader-row">
-        <p>${tx.length} transactions in this period · the newest booking in the data is ${laatste}${periode.dagen ? ` · ${isoLokaal(begin)} → ${laatste}` : ""}</p>
+        <p>${tx.length} transactions in this period · transfers between your own accounts are not counted as in or out · the newest booking in the data is ${laatste}${periode.dagen ? ` · ${isoLokaal(begin)} → ${laatste}` : ""}</p>
         <div class="period-switch">${periodeKnoppen}</div>
       </div>
 
@@ -547,7 +552,7 @@ const Pages = {
           </div>
           <canvas id="insightCats" style="max-height:230px;"></canvas>
           <table class="mini-table">
-            <thead><tr><th>Category</th><th class="num">Out</th><th class="num">Share</th><th class="num">#</th><th class="num">Avg</th></tr></thead>
+            <thead><tr><th>Category</th><th class="num">Out</th><th class="num col-share">Share</th><th class="num">#</th><th class="num">Avg</th></tr></thead>
             <tbody>${catTabel}</tbody>
           </table>
         </div>
@@ -644,7 +649,7 @@ const Pages = {
           responsive: true,
           cutout: "58%",
           plugins: {
-            legend: { position: "right", labels: { color: "#8888a0", font: { size: 12 }, boxWidth: 12 } },
+            legend: { position: window.innerWidth <= 768 ? "bottom" : "right", labels: { color: "#8888a0", font: { size: 12 }, boxWidth: 12 } },
             tooltip: { callbacks: { label: (c) => ` ${c.label}: ${euro(c.parsed)} (${pct((c.parsed / (uitNu || 1)) * 100)})` } },
           },
         },

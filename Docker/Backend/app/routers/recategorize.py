@@ -16,16 +16,21 @@ def recategorize():
     conn = get_db()
     learned = learned_map(conn)
     rows = conn.execute(
-        """SELECT id, merchant_name, description, amount, counterparty_iban
+        """SELECT id, merchant_name, description, remittance, type_description,
+                  amount, counterparty_iban
            FROM transactions"""
     ).fetchall()
 
     per_categorie: dict[str, int] = {}
     veranderd = 0
     for row in rows:
+        tekst = " ".join(
+            x for x in (row["description"] or "", row["remittance"] or "",
+                        row["type_description"] or "") if x
+        )
         cat = categorize(
             row["merchant_name"] or "",
-            row["description"] or "",
+            tekst,
             amount=row["amount"],
             counterparty_iban=row["counterparty_iban"] or "",
             learned=learned,

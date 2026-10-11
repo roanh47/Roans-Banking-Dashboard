@@ -59,8 +59,11 @@ PROCESSORS = (
 EIGEN_PUBLIEK = (
     "spaarrekening", "spaargeld", "studiespaarrekening", "studiesparen",
     "interactive brokers", "ibkr", "naar:", "van:", "overschrijving",
-    "overboeking", "eigen rekening", "revolut", "wise europe",
+    "overboeking", "eigen rekening",
 )
+
+# Geld naar een betaaldienst die geen eigen rekening is, is een uitgave.
+UITGAVE_DIENSTEN = ("wise", "revolut", "transferwise")
 EIGEN = EIGEN_PUBLIEK + tuple(_EIGEN_PRIVE)
 
 # Geld dat binnenkomt en geen salaris is: familie, toeslagen, teruggaven.
@@ -75,13 +78,16 @@ INKOMEN = INKOMEN_PUBLIEK + tuple(_INKOMEN_PRIVE)
 # (trefwoorden, categorie, richting) — richting is -1 voor af (uitgave),
 # +1 voor bij (inkomst), None als het niet uitmaakt. Eerste treffer wint.
 CATEGORY_RULES = [
+    # --- Overboeken tussen eigen rekeningen, altijd eerst ---
+    # Een boeking met je eigen naam erin is een verplaatsing, ook als er
+    # "salaris" in de omschrijving staat: dat geld komt dan van je eigen
+    # spaarrekening en is geen tweede keer inkomen.
+    (EIGEN, "transfer", None),
+
     # --- Inkomen (belastingdienst alleen bij geld dat terugkomt) ---
     (INKOMEN, "income", None),
     (["belastingdienst"], "income", 1),
     (["belastingdienst"], "other", -1),
-
-    # --- Overboeken tussen eigen rekeningen ---
-    (EIGEN, "transfer", None),
     (["betaalverzoek", "tikkie", "verzoek", "betaalverzoeken"], "income", 1),
     (["betaalverzoek", "tikkie", "verzoek", "betaalverzoeken"], "transfer", -1),
 
@@ -141,7 +147,7 @@ CATEGORY_RULES = [
       "megekko", "mac voor minder", "bb-nothing",
       "vinted", "catawiki", "cex", "gamemania", "intertoys", "bart smit",
       "kijkshop", "juwelier", "opticien", "brillen", "schoenen",
-      "sportwinkel", "edc retail", "meubel", "bedden", "wonen", "mobielwerkt",
+      "sportwinkel", "meubel", "bedden", "wonen", "mobielwerkt",
       "gsm", "telefoon", "laptop", "computer", "coolstore", "azerty",
       "alternate", "amazon.de", "amazon.com", "online payment platform",
       "paypal", "gamivo", "g2g", "keak", "nanonoble", "uniqlo", "nike",
@@ -211,6 +217,7 @@ CATEGORY_RULES = [
       "aegon", "nationale-nederlanden", "nn group", "fbto", "promovendum",
       "anderson", "inshared", "allianz", "sns"],
      "other", None),
+    (UITGAVE_DIENSTEN, "other", -1),
 ]
 
 # Woorden die alleen op woordgrens mogen matchen: "ah ", "ns ", "bar " zouden
