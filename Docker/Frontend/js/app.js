@@ -806,7 +806,7 @@ const Pages = {
           .map((month) => {
             const rows = perMonth[month];
             // Overboekingen tussen eigen rekeningen niet meetellen in het maandtotaal
-            const eigen = (t) => (t.category || "") === "transfer";
+            const eigen = (t) => !telTransfersMee && (t.category || "") === "transfer";
             const bin = rows.filter((t) => t.amount > 0 && !eigen(t)).reduce((s, t) => s + t.amount, 0);
             const bout = rows.filter((t) => t.amount < 0 && !eigen(t)).reduce((s, t) => s + t.amount, 0);
             const naam = month === "unknown"
@@ -859,10 +859,13 @@ const Pages = {
 
       // Geel totaal boven de lijst: telt mee met de filters, dus je ziet meteen
       // wat een zoekopdracht of categorie werkelijk aan in en uit oplevert.
+      // Op een voorspelde rekening (spaar, IBKR) is alles een overboeking; daar
+      // zou wegfilteren van transfers een leeg totaal opleveren.
+      const telTransfersMee = !!data.predicted;
       const updateSummary = (rijen) => {
         const el = document.getElementById("txSummary");
         if (!el) return;
-        const eigen = (t) => (t.category || "") === "transfer";
+        const eigen = (t) => !telTransfersMee && (t.category || "") === "transfer";
         const inTot = rijen.reduce((s, t) => s + (t.amount > 0 && !eigen(t) ? t.amount : 0), 0);
         const uitTot = rijen.reduce((s, t) => s + (t.amount < 0 && !eigen(t) ? -t.amount : 0), 0);
         const trIn = rijen.reduce((s, t) => s + (t.amount > 0 && eigen(t) ? t.amount : 0), 0);

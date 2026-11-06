@@ -62,6 +62,10 @@ def list_transactions(
                 "count": len(rijen),
                 "total_in": round(sum(r["amount"] for r in rijen if r["amount"] > 0), 2),
                 "total_out": round(sum(r["amount"] for r in rijen if r["amount"] < 0), 2),
+                # Alles op deze rekening is een overboeking; de frontend telt ze
+                # hier dus wél mee (zie telTransfersMee).
+                "transfer_in": round(sum(r["amount"] for r in rijen if r["amount"] > 0), 2),
+                "transfer_out": round(sum(r["amount"] for r in rijen if r["amount"] < 0), 2),
                 "predicted": True,
             }
 
