@@ -86,11 +86,24 @@ def list_transactions(
     kern = " FROM transactions WHERE " + (" AND ".join(where) if where else "1=1")
 
     count = conn.execute("SELECT COUNT(*)" + kern, params).fetchone()[0]
+    # Totalen zonder overboekingen tussen eigen rekeningen: die tellen anders
+    # dubbel (weg bij de een, bij de ander) en dan klopt het beeld niet meer
+    # met de Insights-pagina, die transfers ook weglaat.
     total_in = conn.execute(
-        "SELECT COALESCE(SUM(amount), 0)" + kern + " AND amount > 0", params
+        "SELECT COALESCE(SUM(amount), 0)" + kern
+        + " AND amount > 0 AND COALESCE(category, '') != 'transfer'", params
     ).fetchone()[0]
     total_out = conn.execute(
-        "SELECT COALESCE(SUM(amount), 0)" + kern + " AND amount < 0", params
+        "SELECT COALESCE(SUM(amount), 0)" + kern
+        + " AND amount < 0 AND COALESCE(category, '') != 'transfer'", params
+    ).fetchone()[0]
+    transfer_in = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0)" + kern
+        + " AND amount > 0 AND category = 'transfer'", params
+    ).fetchone()[0]
+    transfer_out = conn.execute(
+        "SELECT COALESCE(SUM(amount), 0)" + kern
+        + " AND amount < 0 AND category = 'transfer'", params
     ).fetchone()[0]
     rows = conn.execute(
         "SELECT *" + kern + " ORDER BY booking_date DESC, id DESC LIMIT ? OFFSET ?",
@@ -113,5 +126,7 @@ def list_transactions(
         "count": count,
         "total_in": round(total_in, 2),
         "total_out": round(total_out, 2),
+        "transfer_in": round(transfer_in, 2),
+        "transfer_out": round(transfer_out, 2),
         "predicted": False,
     }

@@ -2,7 +2,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.config import settings
 from app.database import get_db
-import requests, json
+import requests
+import uuid, json
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -88,6 +89,12 @@ def _collect_dashboard_context() -> str:
     return "\n".join(parts)
 
 
+def _opencode_headers(base_url: str) -> dict:
+    """opencode.ai/zen/go needs a session id per request, otherwise it answers 400."""
+    if "opencode.ai" in (base_url or ""):
+        return {"x-opencode-session": str(uuid.uuid4())}
+    return {}
+
 def _model_uses_messages_api(model_id: str) -> bool:
     """Detect if a model uses the Anthropic Messages API (/messages) or the OpenAI Chat API (/chat/completions)."""
     prefix = model_id.split("-")[0].lower() if "-" in model_id else model_id.lower()
@@ -102,12 +109,13 @@ def _call_messages_api(base_url: str, api_key: str, model: str, system_prompt: s
             "x-api-key": api_key,
             "Content-Type": "application/json",
             "anthropic-version": "2023-06-01",
+            **_opencode_headers(base_url),
         },
         json={
             "model": model,
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_msg}],
-            "max_tokens": 1024,
+            "max_tokens": 4096,
             "temperature": 0.3,
         },
         timeout=30,
@@ -126,6 +134,7 @@ def _call_chat_api(base_url: str, api_key: str, model: str, system_prompt: str, 
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            **_opencode_headers(base_url),
         },
         json={
             "model": model,
@@ -134,7 +143,7 @@ def _call_chat_api(base_url: str, api_key: str, model: str, system_prompt: str, 
                 {"role": "user", "content": user_msg},
             ],
             "temperature": 0.3,
-            "max_tokens": 1024,
+            "max_tokens": 4096,
         },
         timeout=30,
     )

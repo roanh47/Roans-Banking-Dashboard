@@ -266,11 +266,13 @@ const Pages = {
         const elIncome = document.getElementById("monthIncome");
         const elSpend = document.getElementById("monthSpending");
         const elNet = document.getElementById("monthNet");
-        if (elIncome) elIncome.textContent = "€" + latest.income.toLocaleString();
-        if (elSpend) elSpend.textContent = "-€" + latest.spending.toLocaleString();
+        // Zelfde notatie als de rest van het dashboard (nl-NL, geen kale toLocaleString)
+        const geld = (v) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(Math.abs(v || 0));
+        if (elIncome) elIncome.textContent = "+" + geld(latest.income);
+        if (elSpend) elSpend.textContent = "-" + geld(latest.spending);
         if (elNet) {
           const net = latest.income - latest.spending;
-          elNet.textContent = (net >= 0 ? "+" : "") + "€" + net.toLocaleString();
+          elNet.textContent = (net >= 0 ? "+" : "-") + geld(net);
           elNet.className = net >= 0 ? "balance-positive" : "balance-negative";
         }
       }
@@ -763,8 +765,8 @@ const Pages = {
            </div>
            <div class="account-meta">
              <span>${bereik}</span>
-             <span class="amount-in">+${euro(data.total_in)}</span>
-             <span class="amount-out">-${euro(data.total_out)}</span>
+             <span class="amount-total">Total +${euro(data.total_in)}</span>
+             <span class="amount-total">Total -${euro(data.total_out)}</span>
              ${active.predicted ? '<span class="account-label predicted">predicted from transfers</span>' : ""}
              ${(active.recurring || []).map((r) => `<span class="account-label">recurring ${r.amount >= 0 ? "+" : ""}${euro(r.amount)} every ~${r.every_days} days · next expected ${r.next_expected}</span>`).join("")}
              ${active.projection_12m != null ? `<span class="account-label">at this rate in 12 months: ${euro(active.projection_12m)}</span>` : ""}
@@ -788,6 +790,7 @@ const Pages = {
             <option value="uit">Out only</option>
           </select>
         </div>
+        <div id="txSummary" class="tx-summary"></div>
         <div id="txLijst"></div>`;
 
       const teken = (rijen) => {
@@ -802,8 +805,10 @@ const Pages = {
           .reverse()
           .map((month) => {
             const rows = perMonth[month];
-            const bin = rows.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-            const bout = rows.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0);
+            // Overboekingen tussen eigen rekeningen niet meetellen in het maandtotaal
+            const eigen = (t) => (t.category || "") === "transfer";
+            const bin = rows.filter((t) => t.amount > 0 && !eigen(t)).reduce((s, t) => s + t.amount, 0);
+            const bout = rows.filter((t) => t.amount < 0 && !eigen(t)).reduce((s, t) => s + t.amount, 0);
             const naam = month === "unknown"
               ? "Unknown"
               : new Date(month + "-01").toLocaleDateString("en-GB", { month: "long", year: "numeric" });
@@ -811,7 +816,7 @@ const Pages = {
               <div class="month-block">
                 <div class="month-head">
                   <span>${naam}</span>
-                  <span class="month-sums"><span class="amount-in">+${euro(bin)}</span><span class="amount-out">-${euro(bout)}</span></span>
+                  <span class="month-sums"><span class="amount-total">Total +${euro(bin)}</span><span class="amount-total">Total -${euro(bout)}</span></span>
                 </div>
                 ${rows
                   .map(
@@ -848,11 +853,34 @@ const Pages = {
             (!cat || (t.category || "overig") === cat) &&
             (!kindLabel || (kindLabel === "in" ? t.amount > 0 : t.amount < 0))
         );
+        updateSummary(zichtbaar);
         document.getElementById("txLijst").innerHTML = teken(zichtbaar);
+      };
+
+      // Geel totaal boven de lijst: telt mee met de filters, dus je ziet meteen
+      // wat een zoekopdracht of categorie werkelijk aan in en uit oplevert.
+      const updateSummary = (rijen) => {
+        const el = document.getElementById("txSummary");
+        if (!el) return;
+        const eigen = (t) => (t.category || "") === "transfer";
+        const inTot = rijen.reduce((s, t) => s + (t.amount > 0 && !eigen(t) ? t.amount : 0), 0);
+        const uitTot = rijen.reduce((s, t) => s + (t.amount < 0 && !eigen(t) ? -t.amount : 0), 0);
+        const trIn = rijen.reduce((s, t) => s + (t.amount > 0 && eigen(t) ? t.amount : 0), 0);
+        const trUit = rijen.reduce((s, t) => s + (t.amount < 0 && eigen(t) ? -t.amount : 0), 0);
+        const net = inTot - uitTot;
+        el.innerHTML =
+          `<span class="amount-total">Total +${euro(inTot)}</span>` +
+          `<span class="amount-total">Total -${euro(uitTot)}</span>` +
+          `<span class="${net >= 0 ? "amount-in" : "amount-out"}">Net ${net >= 0 ? "+" : "-"}${euro(net)}</span>` +
+          (trIn || trUit
+            ? `<span class="tx-summary-note">transfers left out: +${euro(trIn)} / -${euro(trUit)}</span>`
+            : "") +
+          `<span class="tx-summary-count">${rijen.length} of ${tx.length} transactions</span>`;
       };
       document.getElementById("txSearch").addEventListener("input", filter);
       document.getElementById("txCategory").addEventListener("change", filter);
       document.getElementById("txSoort").addEventListener("change", filter);
+      updateSummary(zichtbaar);
       document.getElementById("txLijst").innerHTML = teken(zichtbaar);
 
       // Klikken op een boeking: alles wat het dashboard van die boeking heeft.

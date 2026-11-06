@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 from app.database import get_db
 import requests, json
+import uuid
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -110,6 +111,12 @@ def _get_ai_credentials():
     return (ep["value"].strip() if ep else ""), (key["value"].strip() if key else "")
 
 
+def _opencode_headers(base_url: str) -> dict:
+    """opencode.ai/zen/go needs a session id per request, otherwise it answers 400."""
+    if "opencode.ai" in (base_url or ""):
+        return {"x-opencode-session": str(uuid.uuid4())}
+    return {}
+
 def _model_uses_messages_api(model_id: str) -> bool:
     prefix = model_id.split("-")[0].lower() if "-" in model_id else model_id.lower()
     return prefix in ("minimax", "qwen")
@@ -123,12 +130,13 @@ def _call_llm(endpoint: str, api_key: str, model: str, system: str, user: str) -
                 "x-api-key": api_key,
                 "Content-Type": "application/json",
                 "anthropic-version": "2023-06-01",
+                **_opencode_headers(endpoint),
             },
             json={
                 "model": model,
                 "system": system,
                 "messages": [{"role": "user", "content": user}],
-                "max_tokens": 2048,
+                "max_tokens": 8192,
                 "temperature": 0.1,
             },
             timeout=60,
@@ -144,6 +152,7 @@ def _call_llm(endpoint: str, api_key: str, model: str, system: str, user: str) -
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
+                **_opencode_headers(endpoint),
             },
             json={
                 "model": model,
@@ -152,7 +161,7 @@ def _call_llm(endpoint: str, api_key: str, model: str, system: str, user: str) -
                     {"role": "user", "content": user},
                 ],
                 "temperature": 0.1,
-                "max_tokens": 2048,
+                "max_tokens": 8192,
             },
             timeout=60,
         )
@@ -163,43 +172,42 @@ def _call_llm(endpoint: str, api_key: str, model: str, system: str, user: str) -
 @router.post("/categorize")
 def ai_categorize(req: CategorizeRequest):
     """Use the configured LLM to suggest categories for transactions.
-    Returns suggestions for the user to review — does NOT auto-apply."""
 
+    Returns suggestions for the user to review -- does NOT auto-apply.
+    """
     endpoint, api_key = _get_ai_credentials()
     if not endpoint or not api_key:
         raise HTTPException(status_code=400, detail="AI not configured. Go to AI Settings to set your endpoint and API key.")
 
     model = req.model
-    if not model:
-        conn = get_db()
-        row = conn.execute("SELECT value FROM ai_settings WHERE key='model'").fetchone()
-        conn.close()
-        model = row["value"] if row else ""
-    if not model:
-        raise HTTPException(status_code=400, detail="No model selected. Pick one in AI Settings or from the dropdown.")
-
-    # Get existing categories from DB
     conn = get_db()
-    existing_cats = conn.execute(
-        "SELECT DISTINCT category FROM transactions WHERE category IS NOT NULL AND category != '' ORDER BY category"
-    ).fetchall()
-    existing_categories = [r["category"] for r in existing_cats]
+    try:
+        if not model:
+            row = conn.execute("SELECT value FROM ai_settings WHERE key='model'").fetchone()
+            model = row["value"] if row else ""
+        if not model:
+            raise HTTPException(status_code=400, detail="No model selected. Pick one in AI Settings or from the dropdown.")
 
-    # Get transactions (limit to 100 most recent)
-    txns = conn.execute(
-        "SELECT id, description, merchant_name, amount, category, booking_date FROM transactions ORDER BY booking_date DESC LIMIT 100"
-    ).fetchall()
-    conn.close()
+        existing_categories = [r["category"] for r in conn.execute(
+            "SELECT DISTINCT category FROM transactions WHERE category IS NOT NULL AND category != '' ORDER BY category"
+        ).fetchall()]
+
+        # 50 most recent. A reasoning model needs small batches, see BATCH below.
+        txns = conn.execute(
+            "SELECT id, description, merchant_name, amount, category, booking_date "
+            "FROM transactions ORDER BY booking_date DESC LIMIT 50"
+        ).fetchall()
+    finally:
+        conn.close()
 
     if not txns:
-        return {"suggestions": [], "existing_categories": existing_categories}
+        return {"suggestions": [], "existing_categories": existing_categories,
+                "all_categories": existing_categories}
 
-    # Build the prompt
     txn_list = []
     for t in txns:
         desc = t["merchant_name"] or t["description"] or "Unknown"
-        amt = t["amount"]
-        txn_list.append(f"ID:{t['id']} | {desc} | €{amt} | current:{t['category'] or 'other'}")
+        txn_list.append(f"ID:{t['id']} | {desc} | EUR {t['amount']} | current:{t['category'] or 'other'}")
 
     system = (
         "You are a transaction categorizer for a Dutch banking dashboard. "
@@ -209,69 +217,69 @@ def ai_categorize(req: CategorizeRequest):
         "1. Use existing categories when they fit.\n"
         "2. You may suggest NEW categories if none of the existing ones fit well.\n"
         "3. Common categories: food, dining, transport, shopping, housing, entertainment, health, subscriptions, income, transfer, other.\n"
-        "4. Respond ONLY with valid JSON — an array of objects.\n\n"
+        "4. Answer immediately with the JSON array only. No analysis, no reasoning, no explanation.\n\n"
         'Format: [{"id":"<transaction_id>","category":"<category>","new":false}]\n'
-        'Set "new":true only if the category does NOT exist in the existing list.\n'
-        "Do NOT include any explanation, just the JSON array."
+        'Set "new":true only if the category does NOT exist in the existing list.'
     )
 
-    user_msg = "Categorize these transactions:\n\n" + "\n".join(txn_list)
+    # Reasoning models (deepseek, qwen) burn the whole token budget on a long list and
+    # return an empty answer. Ten rows per call keeps each request short and parseable.
+    BATCH = 10
+    suggestions = []
+    last_error = None
+    for start in range(0, len(txn_list), BATCH):
+        chunk = txn_list[start:start + BATCH]
+        try:
+            raw = _call_llm(endpoint, api_key, model, system,
+                            "Categorize these transactions:\n\n" + "\n".join(chunk))
+            cleaned = raw.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
+                if cleaned.endswith("```"):
+                    cleaned = cleaned[:-3]
+                cleaned = cleaned.strip()
+            part = json.loads(cleaned)
+            if isinstance(part, list):
+                suggestions.extend(part)
+        except (requests.exceptions.RequestException, json.JSONDecodeError, ValueError, KeyError) as exc:
+            last_error = exc
 
-    try:
-        raw = _call_llm(endpoint, api_key, model, system, user_msg)
-        # Extract JSON from possible markdown code blocks
-        cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[1] if "\n" in cleaned else cleaned[3:]
-            if cleaned.endswith("```"):
-                cleaned = cleaned[:-3]
-            cleaned = cleaned.strip()
+    if not suggestions:
+        raise HTTPException(status_code=502, detail=f"LLM returned no usable JSON ({last_error})")
 
-        suggestions = json.loads(cleaned)
-        if not isinstance(suggestions, list):
-            raise ValueError("Expected array")
-
-        # Build lookup for current categories
-        current = {t["id"]: (t["category"] or "other") for t in txns}
-        txn_desc = {}
-        for t in txns:
-            txn_desc[t["id"]] = {
-                "description": t["merchant_name"] or t["description"] or "Unknown",
-                "amount": t["amount"],
-                "booking_date": t["booking_date"] or "",
-            }
-
-        result = []
-        for s in suggestions:
-            sid = s.get("id", "")
-            if sid in txn_desc:
-                info = txn_desc[sid]
-                result.append({
-                    "id": sid,
-                    "description": info["description"],
-                    "amount": info["amount"],
-                    "booking_date": info["booking_date"],
-                    "current_category": current.get(sid, "other"),
-                    "suggested_category": s.get("category", "other"),
-                    "is_new_category": s.get("new", False),
-                })
-
-        # Collect all unique suggested categories
-        all_cats = list(set(
-            existing_categories + [s["suggested_category"] for s in result]
-        ))
-        all_cats.sort()
-
-        return {
-            "suggestions": result,
-            "existing_categories": existing_categories,
-            "all_categories": all_cats,
+    # Build lookup for current categories
+    current = {t["id"]: (t["category"] or "other") for t in txns}
+    txn_desc = {}
+    for t in txns:
+        txn_desc[t["id"]] = {
+            "description": t["merchant_name"] or t["description"] or "Unknown",
+            "amount": t["amount"],
+            "booking_date": t["booking_date"] or "",
         }
 
-    except requests.exceptions.RequestException as e:
-        raise HTTPException(status_code=502, detail=f"LLM API error: {str(e)}")
-    except (json.JSONDecodeError, ValueError, KeyError) as e:
-        raise HTTPException(status_code=502, detail=f"Failed to parse LLM response: {str(e)}")
+    result = []
+    for s in suggestions:
+        sid = s.get("id", "")
+        if sid in txn_desc:
+            info = txn_desc[sid]
+            result.append({
+                "id": sid,
+                "description": info["description"],
+                "amount": info["amount"],
+                "booking_date": info["booking_date"],
+                "current_category": current.get(sid, "other"),
+                "suggested_category": s.get("category", "other"),
+                "is_new_category": s.get("new", False),
+            })
+
+    all_cats = list(set(existing_categories + [s["suggested_category"] for s in result]))
+    all_cats.sort()
+
+    return {
+        "suggestions": result,
+        "existing_categories": existing_categories,
+        "all_categories": all_cats,
+    }
 
 
 class ApplyRequest(BaseModel):
