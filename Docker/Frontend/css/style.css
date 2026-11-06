@@ -1374,3 +1374,25 @@ tr:hover { background: var(--bg-card-hover); }
   .tx-summary { gap: 10px; font-size: 13px; }
   .tx-summary-count { margin-left: 0; width: 100%; }
 }
+
+/* ==========================================================================
+   Transactiepagina op een telefoon: de gele totalen en de filters mogen niet
+   van het scherm aflopen. Laatste blok in het bestand, dus het wint.
+   ========================================================================== */
+@media (max-width: 640px) {
+  .tx-summary {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px;
+    font-size: 13px; padding: 10px 12px;
+  }
+  .tx-summary > span { white-space: nowrap; }
+  .tx-summary-note, .tx-summary-count { grid-column: 1 / -1; margin-left: 0; }
+
+  .month-head { flex-direction: column; align-items: stretch; gap: 4px; }
+  .month-sums { width: 100%; justify-content: space-between; gap: 8px; font-size: 12px; }
+
+  .tx-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .tx-tools input { grid-column: 1 / -1; min-width: 0; }
+
+  .chip-row { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  .chip-row .chip { flex: 0 0 auto; }
+}
